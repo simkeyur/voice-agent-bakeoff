@@ -285,9 +285,12 @@ class EvaluationHarness:
                 # Signal turn start to metrics and capture
                 collector.on_input_injected(utt_id, text, utt.get("expect"))
                 capture.start_turn(utt_id)
-                
+
+                # Persist so the UI can show "sent to agent" for this turn while it's in flight
+                await self.manifest.save_async()
+
                 audio_path = os.path.join(settings.AUDIO_DIR, f"{utt_id}.wav")
-                
+
                 # Inject audio file
                 injection_task = asyncio.create_task(injector.inject_wav(audio_path))
                 
@@ -314,7 +317,10 @@ class EvaluationHarness:
 
                 # Score the turn against its expected tool call / response content
                 collector.evaluate_turn()
-                
+
+                # Persist the completed turn (transcript, TTFA, tool eval) for the UI
+                await self.manifest.save_async()
+
                 # Wait between turns to simulate user reflection
                 await asyncio.sleep(2.0)
                 

@@ -315,3 +315,14 @@ def delete_run_from_db(run_id: str):
         conn.commit()
     logger.info(f"Deleted run {run_id} from SQLite database.")
 
+
+def reset_db():
+    """Wipe all runs and turns from SQLite, starting from a clean slate."""
+    _ensure_initialized()
+    with get_db_connection() as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("DELETE FROM turns;")
+        conn.execute("DELETE FROM runs;")
+        conn.commit()
+    logger.warning("Reset SQLite database: deleted all runs and turns.")
+

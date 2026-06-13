@@ -79,6 +79,7 @@ function App() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [settingsSaveMsg, setSettingsSaveMsg] = useState('');
   const [utterancesSaveMsg, setUtterancesSaveMsg] = useState('');
+  const [resetMsg, setResetMsg] = useState('');
   
   // Detailed Run Inspection
   const [selectedRunId, setSelectedRunId] = useState(null);
@@ -132,9 +133,23 @@ function App() {
     { time: new Date().toLocaleTimeString(), text: 'Ready to launch. Select a provider and click "Start Scripted Run".' }
   ]);
 
+  const logsEndRef = useRef(null);
+  const lastPollMsgRef = useRef('');
+
   const addLog = (text) => {
     setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text }]);
   };
+
+  // Like addLog, but skips re-logging the exact same status line on consecutive polls.
+  const addPollLog = (text) => {
+    if (text === lastPollMsgRef.current) return;
+    lastPollMsgRef.current = text;
+    addLog(text);
+  };
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [logs]);
 
   const pollRunStatus = (runId) => {
     fetch(`${backendUrl}/api/runs/${runId}`)
@@ -149,26 +164,38 @@ function App() {
             .then((res) => res.json())
             .then((d) => setRuns(d));
         } else {
-          const turnCount = data.turns ? data.turns.length : 0;
-          const lastTurn = data.turns && data.turns.length > 0 ? data.turns[data.turns.length - 1] : null;
-          let logMsg = `Status: ${data.status.toUpperCase()}. Turns completed: ${turnCount}`;
-          if (lastTurn) {
-            logMsg += ` | ${lastTurn.utterance_id} sent: "${lastTurn.text_input.slice(0, 40)}"`;
+          const turns = data.turns || [];
+          const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+          const turnNum = turns.length;
+
+          let logMsg;
+          if (!lastTurn) {
+            logMsg = `Status: ${data.status.toUpperCase()}. Waiting for the first turn to start...`;
+          } else if (lastTurn.audio_completed_received_at == null) {
+            // Turn is in flight
+            if (!lastTurn.first_audio_received_at) {
+              logMsg = `Turn ${turnNum} (${lastTurn.utterance_id}): sent to agent — "${lastTurn.text_input.slice(0, 50)}" — awaiting response...`;
+            } else {
+              logMsg = `Turn ${turnNum} (${lastTurn.utterance_id}): receiving response (TTFA ${Math.round(lastTurn.time_to_first_audio_ms)}ms)`;
+              if (lastTurn.transcript_output) {
+                logMsg += ` — "${lastTurn.transcript_output.slice(0, 60)}"`;
+              }
+            }
+          } else {
+            // Turn finished
+            logMsg = `Turn ${turnNum} (${lastTurn.utterance_id}) complete`;
+            if (lastTurn.transcript_output) {
+              logMsg += ` — received: "${lastTurn.transcript_output.slice(0, 60)}"`;
+            }
             if (lastTurn.time_to_first_audio_ms != null) {
               logMsg += ` | TTFA: ${Math.round(lastTurn.time_to_first_audio_ms)}ms`;
-            }
-            if (lastTurn.transcript_output) {
-              logMsg += ` | received: "${lastTurn.transcript_output.slice(0, 60)}"`;
             }
             if (lastTurn.tool_call_details) {
               const tc = lastTurn.tool_call_details;
               logMsg += ` | tool: ${tc.name}${tc.latency_ms != null ? ` (${Math.round(tc.latency_ms)}ms)` : ''}`;
             }
-            if (!lastTurn.first_audio_received_at) {
-              logMsg += ' | awaiting response...';
-            }
           }
-          addLog(logMsg);
+          addPollLog(logMsg);
           // Continue polling
           setTimeout(() => pollRunStatus(runId), 2000);
         }
@@ -210,6 +237,7 @@ function App() {
     if (runningId || compareRunIds) return;
 
     setLogs([]);
+    lastPollMsgRef.current = '';
     setCompareData(null);
 
     if (runBothInParallel) {
@@ -382,6 +410,33 @@ function App() {
       });
   };
 
+  const handleResetDatabase = () => {
+    if (!window.confirm('This will permanently delete ALL run history, transcripts, and audio from disk and reset the database. This cannot be undone. Continue?')) {
+      return;
+    }
+
+    setResetMsg('Resetting...');
+    fetch(`${backendUrl}/api/database/reset`, { method: 'POST' })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to reset database.');
+        return res.json();
+      })
+      .then(() => {
+        setRuns([]);
+        setSelectedRunId(null);
+        setSelectedRunData(null);
+        setResetMsg('All data has been reset.');
+        setTimeout(() => setResetMsg(''), 4000);
+      })
+      .catch((err) => {
+        console.error('Error resetting database:', err);
+        setResetMsg(`Error: ${err.message}`);
+      });
+  };
+
+  const needsApiKeySetup = backendConfig?.providers?.length > 0
+    && backendConfig.providers.every((p) => !backendConfig.has_api_key?.[p]);
+
   return (
     <div className="app-container">
       <header className="header">
@@ -450,6 +505,17 @@ function App() {
         </aside>
 
         <main className="main-content">
+        {activeTab === 'launcher' && needsApiKeySetup && (
+          <div className="setup-banner">
+            <div>
+              <strong>Welcome to VoxArena!</strong> No API keys are configured yet, so runs will fail.
+              Add your provider API keys to get started.
+            </div>
+            <button className="btn btn-primary" onClick={() => setActiveTab('settings')}>
+              Set up API Keys
+            </button>
+          </div>
+        )}
         {activeTab === 'launcher' && (
           <div className="launcher-container">
             <div className="card">
@@ -457,98 +523,102 @@ function App() {
                 <span className="card-title">Run Configuration</span>
               </div>
               <div className="card-body">
-                <div className="form-group">
-                  <label className="form-label">Active Provider</label>
-                  <select
-                    className="select-input"
-                    value={selectedProvider}
-                    disabled={runBothInParallel}
-                    onChange={(e) => {
-                      const prov = e.target.value;
-                      setSelectedProvider(prov);
-                      if (prov === 'gemini') {
-                        setSelectedModel(backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview');
-                      } else {
-                        setSelectedModel(backendConfig?.openai_model || 'gpt-realtime-2');
-                      }
-                    }}
-                  >
-                    {backendConfig?.providers?.map(p => (
-                      <option key={p} value={p}>{p.toUpperCase()}</option>
-                    )) || (
-                      <>
-                        <option value="gemini">GEMINI</option>
-                        <option value="openai">OPENAI</option>
-                      </>
-                    )}
-                  </select>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Active Provider</label>
+                    <select
+                      className="select-input"
+                      value={selectedProvider}
+                      disabled={runBothInParallel}
+                      onChange={(e) => {
+                        const prov = e.target.value;
+                        setSelectedProvider(prov);
+                        if (prov === 'gemini') {
+                          setSelectedModel(backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview');
+                        } else {
+                          setSelectedModel(backendConfig?.openai_model || 'gpt-realtime-2');
+                        }
+                      }}
+                    >
+                      {backendConfig?.providers?.map(p => (
+                        <option key={p} value={p}>{p.toUpperCase()}</option>
+                      )) || (
+                        <>
+                          <option value="gemini">GEMINI</option>
+                          <option value="openai">OPENAI</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Model Version</label>
+                    <select
+                      className="select-input"
+                      value={selectedModel}
+                      disabled={runBothInParallel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                    >
+                      {selectedProvider === 'gemini' ? (
+                        <>
+                          <option value={backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview'}>
+                            {backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview'} (Default)
+                          </option>
+                          {backendConfig?.gemini_model !== 'gemini-3.1-flash-live-preview' && (
+                            <option value="gemini-3.1-flash-live-preview">gemini-3.1-flash-live-preview</option>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <option value={backendConfig?.openai_model || 'gpt-realtime-2'}>
+                            {backendConfig?.openai_model || 'gpt-realtime-2'} (Default)
+                          </option>
+                          {backendConfig?.openai_model !== 'gpt-realtime-2' && (
+                            <option value="gpt-realtime-2">gpt-realtime-2</option>
+                          )}
+                        </>
+                      )}
+                    </select>
+                  </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">Model Version</label>
-                  <select
-                    className="select-input"
-                    value={selectedModel}
-                    disabled={runBothInParallel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                  >
-                    {selectedProvider === 'gemini' ? (
-                      <>
-                        <option value={backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview'}>
-                          {backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview'} (Default)
-                        </option>
-                        {backendConfig?.gemini_model !== 'gemini-3.1-flash-live-preview' && (
-                          <option value="gemini-3.1-flash-live-preview">gemini-3.1-flash-live-preview</option>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <option value={backendConfig?.openai_model || 'gpt-realtime-2'}>
-                          {backendConfig?.openai_model || 'gpt-realtime-2'} (Default)
-                        </option>
-                        {backendConfig?.openai_model !== 'gpt-realtime-2' && (
-                          <option value="gpt-realtime-2">gpt-realtime-2</option>
-                        )}
-                      </>
-                    )}
-                  </select>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Transport Layer</label>
+                    <select
+                      className="select-input"
+                      value={selectedTransport}
+                      onChange={(e) => setSelectedTransport(e.target.value)}
+                    >
+                      {backendConfig?.transports?.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      )) || (
+                        <>
+                          <option value="direct-injection">direct-injection</option>
+                          <option value="webrtc-local">webrtc-local</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Number of Conversation Turns</label>
+                    <input
+                      type="number"
+                      className="text-input"
+                      min={1}
+                      max={10}
+                      value={numTurns}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setNumTurns(Number.isNaN(val) ? 1 : Math.min(10, Math.max(1, val)));
+                      }}
+                    />
+                  </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">Transport Layer</label>
-                  <select
-                    className="select-input"
-                    value={selectedTransport}
-                    onChange={(e) => setSelectedTransport(e.target.value)}
-                  >
-                    {backendConfig?.transports?.map(t => (
-                      <option key={t} value={t}>{t}</option>
-                    )) || (
-                      <>
-                        <option value="direct-injection">direct-injection</option>
-                        <option value="webrtc-local">webrtc-local</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Number of Conversation Turns</label>
-                  <input
-                    type="number"
-                    className="text-input"
-                    min={1}
-                    max={10}
-                    value={numTurns}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setNumTurns(Number.isNaN(val) ? 1 : Math.min(10, Math.max(1, val)));
-                    }}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <div className="form-row form-row-actions">
+                  <label className="checkbox-label">
                     <input
                       type="checkbox"
                       checked={runBothInParallel}
@@ -556,26 +626,30 @@ function App() {
                     />
                     Run Gemini &amp; OpenAI in parallel and compare
                   </label>
-                </div>
 
-                <button
-                  className={`btn btn-primary ${(runningId || compareRunIds) ? 'btn-disabled' : ''}`}
-                  style={{ width: '100%', marginTop: 8 }}
-                  onClick={handleStartRun}
-                  disabled={!!(runningId || compareRunIds)}
-                >
-                  {(runningId || compareRunIds)
-                    ? 'Running Test Suite...'
-                    : runBothInParallel ? 'Start Parallel Comparison Run' : 'Start Scripted Run'}
-                </button>
+                  {(runningId || compareRunIds) ? (
+                    <button
+                      className="btn"
+                      style={{ backgroundColor: '#ea4335', color: '#fff', border: 'none', fontWeight: 'bold' }}
+                      onClick={handleStopRun}
+                    >
+                      Stop Run
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleStartRun}
+                    >
+                      {runBothInParallel ? 'Start Parallel Comparison Run' : 'Start Scripted Run'}
+                    </button>
+                  )}
+                </div>
                 {(runningId || compareRunIds) && (
-                  <button
-                    className="btn btn-secondary"
-                    style={{ width: '100%', marginTop: 12, backgroundColor: '#ea4335', color: '#fff', border: 'none', fontWeight: 'bold' }}
-                    onClick={handleStopRun}
-                  >
-                    Stop Run
-                  </button>
+                  <div className="form-row">
+                    <button className="btn btn-primary btn-disabled" style={{ width: '100%' }} disabled>
+                      Running Test Suite...
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -585,13 +659,14 @@ function App() {
                 <span className="card-title">Live Log Console</span>
               </div>
               <div className="card-body" style={{ display: 'flex', flexDirection: 'column' }}>
-                <div className="terminal" style={{ flex: 1, minHeight: 200 }}>
+                <div className="terminal">
                   {logs.map((log, idx) => (
                     <div className="terminal-line" key={idx}>
                       <span className="terminal-timestamp">[{log.time}]</span>
                       <span>{log.text}</span>
                     </div>
                   ))}
+                  <div ref={logsEndRef} />
                 </div>
               </div>
             </div>
@@ -986,6 +1061,33 @@ function App() {
           <div className="scrollable-tab-container">
             <div className="card">
               <div className="card-header">
+                <span className="card-title">API Keys</span>
+              </div>
+              <div className="card-body">
+                <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+                  VoxArena needs API keys for the providers you want to test. Add them to the{' '}
+                  <code>.env</code> file at the root of the project ({backendConfig?.base_dir || 'project root'}),
+                  then restart the server for changes to take effect.
+                </p>
+                {backendConfig?.providers?.map((p) => (
+                  <div key={p} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>
+                      {p.toUpperCase()}_API_KEY
+                    </span>
+                    <span className={`status-badge ${backendConfig?.has_api_key?.[p] ? 'completed' : 'failed'}`}>
+                      {backendConfig?.has_api_key?.[p] ? 'Configured' : 'Missing'}
+                    </span>
+                  </div>
+                ))}
+                <div className="terminal" style={{ marginTop: 12, flex: 'none' }}>
+                  <div className="terminal-line">GOOGLE_API_KEY=your-gemini-api-key</div>
+                  <div className="terminal-line">OPENAI_API_KEY=your-openai-api-key</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ marginTop: 24 }}>
+              <div className="card-header">
                 <span className="card-title">Model Configuration</span>
               </div>
               <div className="card-body">
@@ -1040,6 +1142,23 @@ function App() {
                     Save Utterances
                   </button>
                   {utterancesSaveMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{utterancesSaveMsg}</span>}
+                </div>
+              </div>
+            </div>
+
+            <div className="card danger-zone" style={{ marginTop: 24 }}>
+              <div className="card-header">
+                <span className="card-title" style={{ color: 'var(--error)' }}>Danger Zone</span>
+              </div>
+              <div className="card-body">
+                <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+                  Permanently delete all run history, transcripts, and audio files, and reset the database to a clean state. This cannot be undone.
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button className="btn btn-danger" onClick={handleResetDatabase}>
+                    Reset All Data
+                  </button>
+                  {resetMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{resetMsg}</span>}
                 </div>
               </div>
             </div>

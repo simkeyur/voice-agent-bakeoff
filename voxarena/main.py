@@ -61,6 +61,7 @@ async def get_config():
     """Retrieve global directory settings and credentials availability (without exposing raw keys)."""
     providers = provider_names()
     return {
+        "base_dir": settings.BASE_DIR,
         "results_dir": settings.RESULTS_DIR,
         "script_dir": settings.SCRIPT_DIR,
         "audio_dir": settings.AUDIO_DIR,
@@ -302,6 +303,34 @@ async def delete_run(run_id: str):
         logger.error(f"Failed to delete run {run_id} from SQLite DB: {e}")
         raise HTTPException(status_code=500, detail=f"Database error deleting run: {e}")
     return {"status": "deleted", "run_id": run_id}
+
+
+@app.post("/api/database/reset")
+async def reset_database():
+    """Wipe all run history from SQLite and delete saved results/audio on disk."""
+    from voxarena.database import reset_db
+    import shutil
+
+    for run_id in list(ACTIVE_HARNESSES.keys()):
+        runner.stop_run(run_id)
+    ACTIVE_HARNESSES.clear()
+
+    try:
+        reset_db()
+    except Exception as e:
+        logger.error(f"Failed to reset SQLite database: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error during reset: {e}")
+
+    for provider in provider_names():
+        provider_dir = os.path.join(settings.RESULTS_DIR, provider)
+        if os.path.exists(provider_dir):
+            try:
+                shutil.rmtree(provider_dir)
+                logger.info(f"Deleted results folder on disk: {provider_dir}")
+            except Exception as e:
+                logger.error(f"Failed to delete results folder {provider_dir}: {e}")
+
+    return {"status": "reset"}
 
 
 from voxarena.report_generator import generate_report

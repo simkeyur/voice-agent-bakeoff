@@ -233,11 +233,43 @@ a {
 .card-body {
   padding: 16px;
   flex: 1;
+  min-height: 0;
 }
 
 /* Forms & Inputs */
 .form-group {
   margin-bottom: 16px;
+}
+
+.form-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.form-row .form-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-row-actions {
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  flex: 1;
+  min-width: 0;
+}
+
+.form-row-actions .btn {
+  flex-shrink: 0;
 }
 
 .form-label {
@@ -303,6 +335,39 @@ a {
   cursor: not-allowed;
 }
 
+.btn-danger {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.btn-danger:hover {
+  background-color: var(--error);
+  color: var(--bg);
+}
+
+/* Setup / onboarding banner */
+.setup-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--accent-light);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.setup-banner strong {
+  margin-right: 4px;
+}
+
+.danger-zone {
+  border-color: var(--error);
+}
+
 /* Metrics Displays */
 .metric-value {
   font-size: 32px;
@@ -321,11 +386,12 @@ a {
 .terminal {
   background-color: var(--muted-light);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 12px;
   font-family: var(--font-mono);
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
