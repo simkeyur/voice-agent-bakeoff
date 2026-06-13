@@ -1706,109 +1706,111 @@ function App() {
 
         {activeTab === 'settings' && (
           <div className="scrollable-tab-container">
-            {/* Google Gemini Settings */}
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Google Gemini Configuration</span>
-              </div>
-              <div className="card-body">
-                <div className="form-group" style={{ marginBottom: 12 }}>
-                  <label className="form-label">Google Gemini API Key</label>
-                  <input
-                    type="password"
-                    className="text-input"
-                    value={settingsGoogleApiKey}
-                    onChange={(e) => setSettingsGoogleApiKey(e.target.value)}
-                    placeholder={settingsGoogleApiKey ? "••••••••" : "Enter Google API Key"}
-                  />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginBottom: 24 }}>
+              {/* Google Gemini Settings */}
+              <div className="card" style={{ margin: 0 }}>
+                <div className="card-header">
+                  <span className="card-title">Google Gemini Configuration</span>
                 </div>
-
-                <div className="form-group" style={{ marginBottom: 12 }}>
-                  <label className="form-label">Gemini Model</label>
-                  <select
-                    className="select-input"
-                    value={geminiModelSelect}
-                    onChange={(e) => setGeminiModelSelect(e.target.value)}
-                  >
-                    <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live Preview (Default)</option>
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                    <option value="gemini-2.5-flash-8b">Gemini 2.5 Flash 8B</option>
-                    <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash Exp</option>
-                    <option value="custom">Custom Model...</option>
-                  </select>
-                </div>
-
-                {geminiModelSelect === 'custom' && (
+                <div className="card-body">
                   <div className="form-group" style={{ marginBottom: 12 }}>
-                    <label className="form-label">Custom Gemini Model ID</label>
+                    <label className="form-label">Google Gemini API Key</label>
                     <input
-                      type="text"
+                      type="password"
                       className="text-input"
-                      value={geminiModelCustom}
-                      onChange={(e) => setGeminiModelCustom(e.target.value)}
-                      placeholder="e.g. gemini-3.1-flash-live-preview"
+                      value={settingsGoogleApiKey}
+                      onChange={(e) => setSettingsGoogleApiKey(e.target.value)}
+                      placeholder={settingsGoogleApiKey ? "••••••••" : "Enter Google API Key"}
                     />
                   </div>
-                )}
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-                  <button className="btn btn-primary" onClick={() => handleSaveModelSettings('gemini')}>
-                    Save Gemini Settings
-                  </button>
-                  {geminiSaveMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{geminiSaveMsg}</span>}
-                </div>
-              </div>
-            </div>
-
-            {/* OpenAI Settings */}
-            <div className="card" style={{ marginTop: 24 }}>
-              <div className="card-header">
-                <span className="card-title">OpenAI Configuration</span>
-              </div>
-              <div className="card-body">
-                <div className="form-group" style={{ marginBottom: 12 }}>
-                  <label className="form-label">OpenAI API Key</label>
-                  <input
-                    type="password"
-                    className="text-input"
-                    value={settingsOpenaiApiKey}
-                    onChange={(e) => setSettingsOpenaiApiKey(e.target.value)}
-                    placeholder={settingsOpenaiApiKey ? "••••••••" : "Enter OpenAI API Key"}
-                  />
-                </div>
-
-                <div className="form-group" style={{ marginBottom: 12 }}>
-                  <label className="form-label">OpenAI Model</label>
-                  <select
-                    className="select-input"
-                    value={openaiModelSelect}
-                    onChange={(e) => setOpenaiModelSelect(e.target.value)}
-                  >
-                    <option value="gpt-realtime-2">GPT Realtime 2 (Default)</option>
-                    <option value="gpt-4o-realtime-preview">GPT-4o Realtime Preview</option>
-                    <option value="gpt-4o-mini-realtime-preview">GPT-4o mini Realtime Preview</option>
-                    <option value="custom">Custom Model...</option>
-                  </select>
-                </div>
-
-                {openaiModelSelect === 'custom' && (
                   <div className="form-group" style={{ marginBottom: 12 }}>
-                    <label className="form-label">Custom OpenAI Model ID</label>
+                    <label className="form-label">Gemini Model</label>
+                    <select
+                      className="select-input"
+                      value={geminiModelSelect}
+                      onChange={(e) => setGeminiModelSelect(e.target.value)}
+                    >
+                      <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live Preview (Default)</option>
+                      <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                      <option value="gemini-2.5-flash-8b">Gemini 2.5 Flash 8B</option>
+                      <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash Exp</option>
+                      <option value="custom">Custom Model...</option>
+                    </select>
+                  </div>
+
+                  {geminiModelSelect === 'custom' && (
+                    <div className="form-group" style={{ marginBottom: 12 }}>
+                      <label className="form-label">Custom Gemini Model ID</label>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={geminiModelCustom}
+                        onChange={(e) => setGeminiModelCustom(e.target.value)}
+                        placeholder="e.g. gemini-3.1-flash-live-preview"
+                      />
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+                    <button className="btn btn-primary" onClick={() => handleSaveModelSettings('gemini')}>
+                      Save Gemini Settings
+                    </button>
+                    {geminiSaveMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{geminiSaveMsg}</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* OpenAI Settings */}
+              <div className="card" style={{ margin: 0 }}>
+                <div className="card-header">
+                  <span className="card-title">OpenAI Configuration</span>
+                </div>
+                <div className="card-body">
+                  <div className="form-group" style={{ marginBottom: 12 }}>
+                    <label className="form-label">OpenAI API Key</label>
                     <input
-                      type="text"
+                      type="password"
                       className="text-input"
-                      value={openaiModelCustom}
-                      onChange={(e) => setOpenaiModelCustom(e.target.value)}
-                      placeholder="e.g. gpt-realtime-2"
+                      value={settingsOpenaiApiKey}
+                      onChange={(e) => setSettingsOpenaiApiKey(e.target.value)}
+                      placeholder={settingsOpenaiApiKey ? "••••••••" : "Enter OpenAI API Key"}
                     />
                   </div>
-                )}
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-                  <button className="btn btn-primary" onClick={() => handleSaveModelSettings('openai')}>
-                    Save OpenAI Settings
-                  </button>
-                  {openaiSaveMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{openaiSaveMsg}</span>}
+                  <div className="form-group" style={{ marginBottom: 12 }}>
+                    <label className="form-label">OpenAI Model</label>
+                    <select
+                      className="select-input"
+                      value={openaiModelSelect}
+                      onChange={(e) => setOpenaiModelSelect(e.target.value)}
+                    >
+                      <option value="gpt-realtime-2">GPT Realtime 2 (Default)</option>
+                      <option value="gpt-4o-realtime-preview">GPT-4o Realtime Preview</option>
+                      <option value="gpt-4o-mini-realtime-preview">GPT-4o mini Realtime Preview</option>
+                      <option value="custom">Custom Model...</option>
+                    </select>
+                  </div>
+
+                  {openaiModelSelect === 'custom' && (
+                    <div className="form-group" style={{ marginBottom: 12 }}>
+                      <label className="form-label">Custom OpenAI Model ID</label>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={openaiModelCustom}
+                        onChange={(e) => setOpenaiModelCustom(e.target.value)}
+                        placeholder="e.g. gpt-realtime-2"
+                      />
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+                    <button className="btn btn-primary" onClick={() => handleSaveModelSettings('openai')}>
+                      Save OpenAI Settings
+                    </button>
+                    {openaiSaveMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{openaiSaveMsg}</span>}
+                  </div>
                 </div>
               </div>
             </div>
