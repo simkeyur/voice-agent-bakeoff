@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Sun, Moon, Play, Pause, BarChart3, History, Settings, 
   Mic, CloudLightning, AudioLines, ClipboardCheck, ArrowRightLeft, 
-  Trash2, CheckCircle2, XCircle, AlertCircle, ArrowLeft
+  Trash2, CheckCircle2, XCircle, AlertCircle, ArrowLeft,
+  ChevronLeft, ChevronRight, LayoutDashboard, Plus
 } from 'lucide-react';
 import logoUrl from './assets/logo.png';
 import './App.css';
@@ -355,7 +356,9 @@ function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter =
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState('launcher');
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [isNewRunModalOpen, setIsNewRunModalOpen] = useState(false);
   const [backendConfig, setBackendConfig] = useState(null);
   const [backendStatus, setBackendStatus] = useState('checking');
   const [runs, setRuns] = useState([]);
@@ -404,6 +407,17 @@ function App() {
   const [activeComparison, setActiveComparison] = useState(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
 
+  const selectedRunIdRef = useRef(null);
+  const activeComparisonRef = useRef(null);
+
+  useEffect(() => {
+    selectedRunIdRef.current = selectedRunId;
+  }, [selectedRunId]);
+
+  useEffect(() => {
+    activeComparisonRef.current = activeComparison;
+  }, [activeComparison]);
+
   const handleTriggerComparison = useCallback((runId1, runId2) => {
     setLoadingComparison(true);
     Promise.all([
@@ -438,22 +452,26 @@ function App() {
   // Synchronize hash state with tab/inspect/compare states
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash || '#/launcher';
+      let hash = window.location.hash || '#/dashboard';
+      if (hash.startsWith('#/launcher') || hash.startsWith('#/metrics')) {
+        window.location.hash = '#/dashboard';
+        return;
+      }
+      if (hash.startsWith('#/history')) {
+        window.location.hash = hash.replace('#/history', '#/runs');
+        return;
+      }
       
-      if (hash.startsWith('#/launcher')) {
-        setActiveTab('launcher');
-        setSelectedRunId(null);
-        setActiveComparison(null);
-      } else if (hash.startsWith('#/metrics')) {
-        setActiveTab('metrics');
+      if (hash.startsWith('#/dashboard')) {
+        setActiveTab('dashboard');
         setSelectedRunId(null);
         setActiveComparison(null);
       } else if (hash.startsWith('#/settings')) {
         setActiveTab('settings');
         setSelectedRunId(null);
         setActiveComparison(null);
-      } else if (hash.startsWith('#/history')) {
-        setActiveTab('history');
+      } else if (hash.startsWith('#/runs')) {
+        setActiveTab('runs');
         const parts = hash.split('/');
         if (parts[2] === 'inspect' && parts[3]) {
           setSelectedRunId(parts[3]);
@@ -532,6 +550,9 @@ function App() {
       .then((res) => res.json())
       .then((data) => {
         setRunStatus(data.status);
+        if (selectedRunIdRef.current === runId) {
+          setSelectedRunData(data);
+        }
         if (data.status === 'completed' || data.status === 'failed') {
           addLog(`Run ${data.status.toUpperCase()}!`);
           setRunningId(null);
@@ -592,6 +613,11 @@ function App() {
         const summarize = (label, d) => `${label}: ${d.status?.toUpperCase()} (turns: ${d.turns ? d.turns.length : 0})`;
         addLog(`${summarize('Gemini', geminiData)} | ${summarize('OpenAI', openaiData)}`);
 
+        if (activeComparisonRef.current && 
+            (activeComparisonRef.current.run1.run_id === geminiRunId && activeComparisonRef.current.run2.run_id === openaiRunId)) {
+          setActiveComparison({ run1: geminiData, run2: openaiData });
+        }
+
         if (isDone(geminiData) && isDone(openaiData)) {
           addLog('Both comparison runs finished.');
           setCompareData({ gemini: geminiData, openai: openaiData });
@@ -637,6 +663,10 @@ function App() {
             setCompareRunIds({ gemini: data.gemini_run_id, openai: data.openai_run_id });
             addLog(`Comparison runs started. Gemini: ${data.gemini_run_id}, OpenAI: ${data.openai_run_id}`);
             pollCompareStatus(data.gemini_run_id, data.openai_run_id);
+            
+            // Navigate to Runs compare page
+            setIsNewRunModalOpen(false);
+            window.location.hash = `#/runs/compare/${data.gemini_run_id}/${data.openai_run_id}`;
           } else {
             addLog(`Failed to start comparison run: ${data.detail || 'unknown error'}`);
           }
@@ -665,6 +695,10 @@ function App() {
           setRunningId(data.run_id);
           addLog(`Run started in background. ID: ${data.run_id}`);
           pollRunStatus(data.run_id);
+
+          // Navigate to Runs inspect page
+          setIsNewRunModalOpen(false);
+          window.location.hash = `#/runs/inspect/${data.run_id}`;
         } else {
           addLog(`Failed to start run: ${data.detail || 'unknown error'}`);
         }
@@ -771,6 +805,7 @@ function App() {
         if (res.ok) {
           if (selectedRunId === runId) {
             setSelectedRunId(null);
+            window.location.hash = '#/runs';
           }
           // Refresh runs list
           fetch(`${backendUrl}/api/runs`)
@@ -801,6 +836,7 @@ function App() {
         setRuns([]);
         setSelectedRunId(null);
         setSelectedRunData(null);
+        window.location.hash = '#/runs';
         setResetMsg('All data has been reset.');
         setTimeout(() => setResetMsg(''), 4000);
       })
@@ -831,6 +867,8 @@ function App() {
 
   const needsApiKeySetup = backendConfig?.providers?.length > 0
     && backendConfig.providers.every((p) => !backendConfig.has_api_key?.[p]);
+
+  const noModelsConfigured = backendConfig && (!backendConfig.gemini_model || !backendConfig.openai_model);
 
   return (
     <div className="app-container">
@@ -864,46 +902,55 @@ function App() {
       </header>
 
       <div className="app-body">
-        <aside className="sidebar">
-          <nav className="sidebar-nav">
-            <button
-              className={`sidebar-btn ${activeTab === 'launcher' ? 'active' : ''}`}
-              onClick={() => { window.location.hash = '#/launcher'; }}
-              title="Run Launcher"
-              aria-label="Run Launcher"
-            >
-              <Play size={18} />
-            </button>
-            <button
-              className={`sidebar-btn ${activeTab === 'metrics' ? 'active' : ''}`}
-              onClick={() => { window.location.hash = '#/metrics'; }}
-              title="Metrics Showdown"
-              aria-label="Metrics Showdown"
-            >
-              <BarChart3 size={18} />
-            </button>
-            <button
-              className={`sidebar-btn ${activeTab === 'history' ? 'active' : ''}`}
-              onClick={() => { window.location.hash = '#/history'; }}
-              title="Results Browser"
-              aria-label="Results Browser"
-            >
-              <History size={18} />
-            </button>
-          </nav>
+        <aside className={`sidebar ${sidebarExpanded ? 'expanded' : ''}`}>
+          <div className="sidebar-top">
+            <nav className="sidebar-nav">
+              <button
+                className={`sidebar-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+                onClick={() => { window.location.hash = '#/dashboard'; }}
+                title="Dashboard"
+                aria-label="Dashboard"
+              >
+                <LayoutDashboard size={18} />
+                {sidebarExpanded && <span className="sidebar-btn-label">Dashboard</span>}
+              </button>
+              <button
+                className={`sidebar-btn ${activeTab === 'runs' ? 'active' : ''}`}
+                onClick={() => { window.location.hash = '#/runs'; }}
+                title="Benchmark Runs"
+                aria-label="Benchmark Runs"
+              >
+                <History size={18} />
+                {sidebarExpanded && <span className="sidebar-btn-label">Runs</span>}
+              </button>
+            </nav>
+          </div>
 
-          <button
-            className={`sidebar-btn ${activeTab === 'settings' ? 'active' : ''}`}
-            onClick={() => { window.location.hash = '#/settings'; }}
-            title="Settings"
-            aria-label="Settings"
-          >
-            <Settings size={18} />
-          </button>
+          <div className="sidebar-bottom">
+            <button
+              className={`sidebar-btn ${activeTab === 'settings' ? 'active' : ''}`}
+              onClick={() => { window.location.hash = '#/settings'; }}
+              title="Settings"
+              aria-label="Settings"
+            >
+              <Settings size={18} />
+              {sidebarExpanded && <span className="sidebar-btn-label">Settings</span>}
+            </button>
+
+            <button 
+              className="sidebar-toggle-btn"
+              onClick={() => setSidebarExpanded(!sidebarExpanded)}
+              title={sidebarExpanded ? "Collapse Sidebar" : "Expand Sidebar"}
+              aria-label={sidebarExpanded ? "Collapse Sidebar" : "Expand Sidebar"}
+              style={{ marginTop: 6 }}
+            >
+              {sidebarExpanded ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+            </button>
+          </div>
         </aside>
 
         <main className="main-content">
-        {activeTab === 'launcher' && needsApiKeySetup && (
+        {activeTab === 'dashboard' && needsApiKeySetup && (
           <div className="setup-banner">
             <div>
               <strong>Welcome to VoxArena!</strong> No API keys are configured yet, so runs will fail.
@@ -914,170 +961,22 @@ function App() {
             </button>
           </div>
         )}
-        {activeTab === 'launcher' && (
-          <div className="launcher-container">
-            {(runningId || compareRunIds) && (
-              <LivePipelineVisualizer activeStep={getActivePipelineStep()} />
-            )}
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Run Configuration</span>
-              </div>
-              <div className="card-body">
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Active Provider</label>
-                    <select
-                      className="select-input"
-                      value={selectedProvider}
-                      disabled={runBothInParallel}
-                      onChange={(e) => {
-                        const prov = e.target.value;
-                        setSelectedProvider(prov);
-                        if (prov === 'gemini') {
-                          setSelectedModel(backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview');
-                        } else {
-                          setSelectedModel(backendConfig?.openai_model || 'gpt-realtime-2');
-                        }
-                      }}
-                    >
-                      {backendConfig?.providers?.map(p => (
-                        <option key={p} value={p}>{p.toUpperCase()}</option>
-                      )) || (
-                        <>
-                          <option value="gemini">GEMINI</option>
-                          <option value="openai">OPENAI</option>
-                        </>
-                      )}
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Model Version</label>
-                    <select
-                      className="select-input"
-                      value={selectedModel}
-                      disabled={runBothInParallel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                    >
-                      {selectedProvider === 'gemini' ? (
-                        <>
-                          <option value={backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview'}>
-                            {backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview'} (Default)
-                          </option>
-                          {backendConfig?.gemini_model !== 'gemini-3.1-flash-live-preview' && (
-                            <option value="gemini-3.1-flash-live-preview">gemini-3.1-flash-live-preview</option>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <option value={backendConfig?.openai_model || 'gpt-realtime-2'}>
-                            {backendConfig?.openai_model || 'gpt-realtime-2'} (Default)
-                          </option>
-                          {backendConfig?.openai_model !== 'gpt-realtime-2' && (
-                            <option value="gpt-realtime-2">gpt-realtime-2</option>
-                          )}
-                        </>
-                      )}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Transport Layer</label>
-                    <select
-                      className="select-input"
-                      value={selectedTransport}
-                      onChange={(e) => setSelectedTransport(e.target.value)}
-                    >
-                      {backendConfig?.transports?.map(t => (
-                        <option key={t} value={t}>{t}</option>
-                      )) || (
-                        <>
-                          <option value="direct-injection">direct-injection</option>
-                          <option value="webrtc-local">webrtc-local</option>
-                        </>
-                      )}
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Number of Conversation Turns</label>
-                    <input
-                      type="number"
-                      className="text-input"
-                      min={1}
-                      max={10}
-                      value={numTurns}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setNumTurns(Number.isNaN(val) ? 1 : Math.min(10, Math.max(1, val)));
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="form-row form-row-actions">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={runBothInParallel}
-                      onChange={(e) => setRunBothInParallel(e.target.checked)}
-                    />
-                    Run Gemini &amp; OpenAI in parallel and compare
-                  </label>
-
-                  {(runningId || compareRunIds) ? (
-                    <button
-                      className="btn"
-                      style={{ backgroundColor: '#ea4335', color: '#fff', border: 'none', fontWeight: 'bold' }}
-                      onClick={handleStopRun}
-                    >
-                      Stop Run
-                    </button>
-                  ) : (
-                    <button
-                      className="btn btn-primary"
-                      onClick={handleStartRun}
-                    >
-                      {runBothInParallel ? 'Start Parallel Comparison Run' : 'Start Scripted Run'}
-                    </button>
-                  )}
-                </div>
-                {(runningId || compareRunIds) && (
-                  <div className="form-row">
-                    <button className="btn btn-primary btn-disabled" style={{ width: '100%' }} disabled>
-                      Running Test Suite...
-                    </button>
-                  </div>
-                )}
+        {activeTab === 'dashboard' && noModelsConfigured && (
+          <div className="setup-banner danger-zone">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertCircle size={16} style={{ color: 'var(--error)', flexShrink: 0 }} />
+              <div>
+                <strong>Configuration Warning:</strong> No voice models are configured. Please set up model names for Gemini and OpenAI to run benchmarks.
               </div>
             </div>
-
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Live Log Console</span>
-              </div>
-              <div className="card-body" style={{ display: 'flex', flexDirection: 'column' }}>
-                <div className="terminal">
-                  {logs.map((log, idx) => (
-                    <div className="terminal-line" key={idx}>
-                      <span className="terminal-timestamp">[{log.time}]</span>
-                      <span>{log.text}</span>
-                    </div>
-                  ))}
-                  <div ref={logsEndRef} />
-                </div>
-              </div>
-            </div>
+            <button className="btn btn-primary" onClick={() => { window.location.hash = '#/settings'; }}>
+              Configure Models
+            </button>
           </div>
         )}
-
-        {activeTab === 'metrics' && (() => {
+        {activeTab === 'dashboard' && (() => {
           const completedRuns = runs.filter(r => r.status === 'completed');
           
-          // Calculate provider aggregates
           const getAggregates = (provider) => {
             const pRuns = completedRuns.filter(r => r.provider === provider);
             if (pRuns.length === 0) return null;
@@ -1100,29 +999,42 @@ function App() {
           
           const geminiStats = getAggregates('gemini');
           const openaiStats = getAggregates('openai');
-          
           const hasStats = geminiStats || openaiStats;
-          
-          // Helper to calculate max value for relative bar widths
-          const maxTtfa = Math.max(geminiStats?.avgTtfa || 0, openaiStats?.avgTtfa || 0) || 1000;
-          const maxInterruption = Math.max(geminiStats?.avgInterruption || 0, openaiStats?.avgInterruption || 0) || 1000;
 
           return (
             <div className="scrollable-tab-container">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <h2 style={{ fontSize: 18, fontWeight: 700 }}>Arena Dashboard</h2>
+                  <p style={{ color: 'var(--muted)', fontSize: 13 }}>Comparative aggregates of all benchmark runs</p>
+                </div>
+                <button 
+                  className="btn btn-primary" 
+                  onClick={() => setIsNewRunModalOpen(true)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Plus size={16} />
+                  <span>Start New Run</span>
+                </button>
+              </div>
+
               {!hasStats ? (
-                <div className="card">
+                <div className="card" style={{ marginBottom: 16 }}>
                   <div className="card-header">
-                    <span className="card-title">Metrics Showdown</span>
+                    <span className="card-title">Welcome to VoxArena</span>
                   </div>
-                  <div className="card-body">
-                    <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '60px 0' }}>
-                      No completed runs found. Execute at least one run from the "Run Launcher" tab to see comparative analytics.
+                  <div className="card-body" style={{ textAlign: 'center', padding: '40px 0' }}>
+                    <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
+                      No completed benchmark runs found. Let's start by launching your first test!
                     </p>
+                    <button className="btn btn-primary" onClick={() => setIsNewRunModalOpen(true)}>
+                      Start Your First Run
+                    </button>
                   </div>
                 </div>
               ) : (
                 <div>
-                  <div className="grid-3" style={{ marginBottom: 24 }}>
+                  <div className="grid-3" style={{ marginBottom: 16 }}>
                     <div className="card">
                       <div className="card-header"><span className="card-title">Latency Showdown (TTFA)</span></div>
                       <div className="card-body">
@@ -1166,34 +1078,66 @@ function App() {
                     </div>
                   </div>
 
-                  <div className="card">
-                    <div className="card-header"><span className="card-title">Fact Hallucinations</span></div>
-                    <div className="card-body">
-                      <table className="runs-table" style={{ margin: 0 }}>
-                        <thead>
-                          <tr>
-                            <th>Provider</th>
-                            <th>Experiment Runs</th>
-                            <th>Total Hallucinations Audited</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {geminiStats && (
+                  <div className="grid-2" style={{ marginBottom: 16 }}>
+                    <div className="card">
+                      <div className="card-header"><span className="card-title">Fact Hallucinations</span></div>
+                      <div className="card-body">
+                        <table className="runs-table" style={{ margin: 0 }}>
+                          <thead>
                             <tr>
-                              <td>GEMINI</td>
-                              <td>{geminiStats.runCount}</td>
-                              <td>{geminiStats.totalHallucinations}</td>
+                              <th>Provider</th>
+                              <th>Experiment Runs</th>
+                              <th>Total Hallucinations</th>
                             </tr>
-                          )}
-                          {openaiStats && (
+                          </thead>
+                          <tbody>
+                            {geminiStats && (
+                              <tr>
+                                <td>GEMINI</td>
+                                <td>{geminiStats.runCount}</td>
+                                <td>{geminiStats.totalHallucinations}</td>
+                              </tr>
+                            )}
+                            {openaiStats && (
+                              <tr>
+                                <td>OPENAI</td>
+                                <td>{openaiStats.runCount}</td>
+                                <td>{openaiStats.totalHallucinations}</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="card">
+                      <div className="card-header"><span className="card-title">Recent Run Log</span></div>
+                      <div className="card-body" style={{ overflowY: 'auto', maxHeight: '180px', padding: 0 }}>
+                        <table className="runs-table" style={{ margin: 0 }}>
+                          <thead>
                             <tr>
-                              <td>OPENAI</td>
-                              <td>{openaiStats.runCount}</td>
-                              <td>{openaiStats.totalHallucinations}</td>
+                              <th>Run ID</th>
+                              <th>Model</th>
+                              <th>Status</th>
                             </tr>
-                          )}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {runs.slice(0, 5).map(r => (
+                              <tr 
+                                key={r.run_id} 
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => { window.location.hash = `#/runs/inspect/${r.run_id}`; }}
+                              >
+                                <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{r.run_id.slice(0, 12)}...</td>
+                                <td>{r.model}</td>
+                                <td>
+                                  <span className={`status-badge ${r.status}`}>{r.status}</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1202,7 +1146,7 @@ function App() {
           );
         })()}
 
-        {activeTab === 'history' && (
+        {activeTab === 'runs' && (
           <div className="scrollable-tab-container">
             {loadingComparison ? (
               <div className="card">
@@ -1219,9 +1163,9 @@ function App() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <button 
                       className="btn-icon" 
-                      onClick={() => { window.location.hash = '#/history'; }}
+                      onClick={() => { window.location.hash = '#/runs'; }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg)', padding: 4, display: 'flex', alignItems: 'center' }}
-                      title="Back to History"
+                      title="Back to Runs"
                     >
                       <ArrowLeft size={18} />
                     </button>
@@ -1289,43 +1233,54 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Split Turn-by-Turn transcript comparator */}
-                  <h3 style={{ fontSize: 14, fontWeight: 600, borderBottom: '1px solid var(--border)', paddingBottom: 8, marginTop: 32, marginBottom: 16 }}>
-                    Turn-by-Turn Side Transcript Comparison
-                  </h3>
+                  {/* Live comparison logs if active */}
+                  {(compareRunIds || activeComparison.run1.status === 'running' || activeComparison.run2.status === 'running') && (
+                    <div className="card" style={{ marginTop: 16 }}>
+                      <div className="card-header">
+                        <span className="card-title">Live Comparison Logs</span>
+                      </div>
+                      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', height: '200px' }}>
+                        <div className="terminal" style={{ flex: 1 }}>
+                          {logs.map((log, idx) => (
+                            <div className="terminal-line" key={idx}>
+                              <span className="terminal-timestamp">[{log.time}]</span>
+                              <span>{log.text}</span>
+                            </div>
+                          ))}
+                          <div ref={logsEndRef} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                  {/* Side-by-Side Turn list */}
+                  <div style={{ marginTop: 20 }}>
+                    <h3 style={{ fontSize: 13, fontWeight: 600, borderBottom: '1px solid var(--border)', paddingBottom: 6, marginBottom: 12 }}>
+                      Turn Comparison
+                    </h3>
+                    
                     {activeComparison.run1.turns.map((turn1, index) => {
                       const turn2 = activeComparison.run2.turns[index] || {};
                       const passed1 = !!turn1.transcript_output && turn1.evaluation_passed !== false;
                       const passed2 = !!turn2.transcript_output && turn2.evaluation_passed !== false;
-
+                      
                       return (
-                        <div key={index} className="comparison-turn-row" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 20 }}>
-                          <div style={{ marginBottom: 10 }}>
-                            <span className="header-badge" style={{ fontSize: 11, fontWeight: 'bold' }}>TURN {turn1.utterance_id}</span>
+                        <div key={index} style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 16 }}>
+                          <div style={{ marginBottom: 8 }}>
+                            <span className="header-badge">TURN {turn1.utterance_id}</span>
+                            <span style={{ fontSize: 12, marginLeft: 8, color: 'var(--muted)' }}>Prompt: "{turn1.text_input}"</span>
                           </div>
                           
-                          <div className="compare-split-view" style={{ marginTop: 0 }}>
-                            {/* Run 1 Turn Card (Gemini) */}
-                            <div className={`comparison-card ${passed1 ? 'row-pass' : 'row-fail'}`} style={{ borderLeft: `4px solid ${passed1 ? 'var(--success)' : 'var(--error)'}` }}>
+                          <div className="compare-split-view" style={{ marginTop: 6 }}>
+                            <div className="comparison-card" style={{ borderLeft: `3px solid ${passed1 ? 'var(--success)' : 'var(--error)'}` }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-primary)' }}>Gemini Response</span>
-                                <span className={`status-badge ${passed1 ? 'completed' : 'failed'}`}>
-                                  {passed1 ? 'PASS' : 'FAIL'}
-                                </span>
+                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-primary)' }}>GEMINI</span>
+                                <span className={`status-badge ${passed1 ? 'completed' : 'failed'}`}>{passed1 ? 'PASS' : 'FAIL'}</span>
                               </div>
-                              <div style={{ fontSize: 13, marginTop: 4 }}>
-                                <div style={{ color: 'var(--muted)', fontSize: 10 }}>User Input:</div>
-                                <div style={{ fontWeight: 500 }}>"{turn1.text_input}"</div>
+                              <div style={{ fontSize: 13, margin: '8px 0', minHeight: 40 }}>
+                                {turn1.transcript_output || <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>(No speech output returned)</span>}
                               </div>
-                              <div style={{ fontSize: 13 }}>
-                                <div style={{ color: 'var(--muted)', fontSize: 10 }}>Agent Transcript:</div>
-                                <div style={{ fontWeight: 500, fontStyle: !turn1.transcript_output ? 'italic' : 'normal' }}>
-                                  {turn1.transcript_output || "(No speech output returned)"}
-                                </div>
-                              </div>
-                              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 8, marginTop: 4 }}>
+                              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px dashed var(--border)', paddingTop: 6 }}>
                                 <div>TTFA: <strong>{turn1.time_to_first_audio_ms ? `${turn1.time_to_first_audio_ms.toFixed(0)}ms` : '—'}</strong></div>
                                 <div>Int Stop: <strong>{turn1.interruption_stop_latency_ms ? `${turn1.interruption_stop_latency_ms.toFixed(0)}ms` : '—'}</strong></div>
                                 <div>Tool: <strong>{turn1.tool_call_details ? turn1.tool_call_details.name : '—'}</strong></div>
@@ -1345,25 +1300,15 @@ function App() {
                               )}
                             </div>
 
-                            {/* Run 2 Turn Card (OpenAI) */}
-                            <div className={`comparison-card ${passed2 ? 'row-pass' : 'row-fail'}`} style={{ borderLeft: `4px solid ${passed2 ? 'var(--success)' : 'var(--error)'}` }}>
+                            <div className="comparison-card" style={{ borderLeft: `3px solid ${passed2 ? 'var(--success)' : 'var(--error)'}` }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-secondary)' }}>OpenAI Response</span>
-                                <span className={`status-badge ${passed2 ? 'completed' : 'failed'}`}>
-                                  {passed2 ? 'PASS' : 'FAIL'}
-                                </span>
+                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-secondary)' }}>OPENAI</span>
+                                <span className={`status-badge ${passed2 ? 'completed' : 'failed'}`}>{passed2 ? 'PASS' : 'FAIL'}</span>
                               </div>
-                              <div style={{ fontSize: 13, marginTop: 4 }}>
-                                <div style={{ color: 'var(--muted)', fontSize: 10 }}>User Input:</div>
-                                <div style={{ fontWeight: 500 }}>"{turn2.text_input || turn1.text_input}"</div>
+                              <div style={{ fontSize: 13, margin: '8px 0', minHeight: 40 }}>
+                                {turn2.transcript_output || <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>(No speech output returned)</span>}
                               </div>
-                              <div style={{ fontSize: 13 }}>
-                                <div style={{ color: 'var(--muted)', fontSize: 10 }}>Agent Transcript:</div>
-                                <div style={{ fontWeight: 500, fontStyle: !turn2.transcript_output ? 'italic' : 'normal' }}>
-                                  {turn2.transcript_output || "(No speech output returned)"}
-                                </div>
-                              </div>
-                              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 8, marginTop: 4 }}>
+                              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px dashed var(--border)', paddingTop: 6 }}>
                                 <div>TTFA: <strong>{turn2.time_to_first_audio_ms ? `${turn2.time_to_first_audio_ms.toFixed(0)}ms` : '—'}</strong></div>
                                 <div>Int Stop: <strong>{turn2.interruption_stop_latency_ms ? `${turn2.interruption_stop_latency_ms.toFixed(0)}ms` : '—'}</strong></div>
                                 <div>Tool: <strong>{turn2.tool_call_details ? turn2.tool_call_details.name : '—'}</strong></div>
@@ -1396,9 +1341,9 @@ function App() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <button 
                       className="btn-icon" 
-                      onClick={() => { window.location.hash = '#/history'; }}
+                      onClick={() => { window.location.hash = '#/runs'; }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg)', padding: 4, display: 'flex', alignItems: 'center' }}
-                      title="Back to History"
+                      title="Back to Runs"
                     >
                       <ArrowLeft size={18} />
                     </button>
@@ -1420,6 +1365,37 @@ function App() {
                     <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '20px 0' }}>Loading details...</p>
                   ) : (
                     <div>
+                      {/* Live pipeline telemetry and logs if active/running */}
+                      {(selectedRunData.status === 'running' || selectedRunData.status === 'pending' || runningId === selectedRunId) && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: 24 }}>
+                          <div className="card">
+                            <div className="card-header">
+                              <span className="card-title">Live Pipeline Status</span>
+                            </div>
+                            <div className="card-body">
+                              <LivePipelineVisualizer activeStep={getActivePipelineStep()} />
+                            </div>
+                          </div>
+                          
+                          <div className="card">
+                            <div className="card-header">
+                              <span className="card-title">Live Logs</span>
+                            </div>
+                            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', height: '240px' }}>
+                              <div className="terminal" style={{ flex: 1 }}>
+                                {logs.map((log, idx) => (
+                                  <div className="terminal-line" key={idx}>
+                                    <span className="terminal-timestamp">[{log.time}]</span>
+                                    <span>{log.text}</span>
+                                  </div>
+                                ))}
+                                <div ref={logsEndRef} />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Summary Row */}
                       <div className="grid-3" style={{ marginBottom: 24 }}>
                         <div>
@@ -1531,18 +1507,23 @@ function App() {
                 </div>
               </div>
             ) : (
-              // Run List History Table
+              // Run List Table
               <div className="card">
-                <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className="card-title">Completed Experiments</span>
-                  {compareSelection.length === 2 && (
-                    <button 
-                      className="btn btn-primary"
-                      onClick={() => { window.location.hash = `#/history/compare/${compareSelection[0]}/${compareSelection[1]}`; }}
-                    >
-                      Compare Selected ({compareSelection.length})
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', backgroundColor: 'var(--accent-light)' }}>
+                  <span className="card-title">Benchmark Runs</span>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="btn btn-primary" onClick={() => setIsNewRunModalOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <Plus size={14} /> New Run
                     </button>
-                  )}
+                    {compareSelection.length === 2 && (
+                      <button 
+                        className="btn btn-primary"
+                        onClick={() => { window.location.hash = `#/runs/compare/${compareSelection[0]}/${compareSelection[1]}`; }}
+                      >
+                        Compare Selected ({compareSelection.length})
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="card-body" style={{ padding: 0 }}>
                   {runs.length === 0 ? (
@@ -1603,7 +1584,7 @@ function App() {
                                   <button 
                                     className="btn" 
                                     style={{ padding: '4px 8px', fontSize: 11 }}
-                                    onClick={() => { window.location.hash = `#/history/inspect/${run.run_id}`; }}
+                                    onClick={() => { window.location.hash = `#/runs/inspect/${run.run_id}`; }}
                                   >
                                     Inspect
                                   </button>
@@ -1741,6 +1722,146 @@ function App() {
         )}
       </main>
       </div>
+
+      {isNewRunModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsNewRunModalOpen(false)}>
+          <div className="modal-content-card glass-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Launch New Benchmark Run</span>
+              <button className="modal-close-btn" onClick={() => setIsNewRunModalOpen(false)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ color: 'var(--fg)' }}>
+              <div className="form-group" style={{ marginBottom: 16 }}>
+                <label className="checkbox-label" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={runBothInParallel}
+                    onChange={(e) => setRunBothInParallel(e.target.checked)}
+                  />
+                  Compare Gemini &amp; OpenAI in parallel
+                </label>
+              </div>
+
+              {!runBothInParallel && (
+                <div className="form-row" style={{ marginBottom: 12 }}>
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">Active Provider</label>
+                    <select
+                      className="select-input"
+                      value={selectedProvider}
+                      onChange={(e) => {
+                        const prov = e.target.value;
+                        setSelectedProvider(prov);
+                        if (prov === 'gemini') {
+                          setSelectedModel(backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview');
+                        } else {
+                          setSelectedModel(backendConfig?.openai_model || 'gpt-realtime-2');
+                        }
+                      }}
+                    >
+                      {backendConfig?.providers?.map(p => (
+                        <option key={p} value={p}>{p.toUpperCase()}</option>
+                      )) || (
+                        <>
+                          <option value="gemini">GEMINI</option>
+                          <option value="openai">OPENAI</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ flex: 1 }}>
+                    <label className="form-label">Model Version</label>
+                    <select
+                      className="select-input"
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                    >
+                      {selectedProvider === 'gemini' ? (
+                        <>
+                          <option value={backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview'}>
+                            {backendConfig?.gemini_model || 'gemini-3.1-flash-live-preview'} (Default)
+                          </option>
+                          {backendConfig?.gemini_model !== 'gemini-3.1-flash-live-preview' && (
+                            <option value="gemini-3.1-flash-live-preview">gemini-3.1-flash-live-preview</option>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <option value={backendConfig?.openai_model || 'gpt-realtime-2'}>
+                            {backendConfig?.openai_model || 'gpt-realtime-2'} (Default)
+                          </option>
+                          {backendConfig?.openai_model !== 'gpt-realtime-2' && (
+                            <option value="gpt-realtime-2">gpt-realtime-2</option>
+                          )}
+                        </>
+                      )}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className="form-row" style={{ marginBottom: 16 }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Transport Layer</label>
+                  <select
+                    className="select-input"
+                    value={selectedTransport}
+                    onChange={(e) => setSelectedTransport(e.target.value)}
+                  >
+                    {backendConfig?.transports?.map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    )) || (
+                      <>
+                        <option value="direct-injection">direct-injection</option>
+                        <option value="webrtc-local">webrtc-local</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Conversation Turns</label>
+                  <input
+                    type="number"
+                    className="text-input"
+                    min={1}
+                    max={10}
+                    value={numTurns}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setNumTurns(Number.isNaN(val) ? 1 : Math.min(10, Math.max(1, val)));
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 20 }}>
+                <button className="btn" type="button" onClick={() => setIsNewRunModalOpen(false)}>
+                  Cancel
+                </button>
+                {runningId || compareRunIds ? (
+                  <button 
+                    className="btn" 
+                    type="button"
+                    style={{ backgroundColor: '#ea4335', color: '#fff', border: 'none', fontWeight: 'bold' }}
+                    onClick={() => {
+                      handleStopRun();
+                      setIsNewRunModalOpen(false);
+                    }}
+                  >
+                    Stop Current Run
+                  </button>
+                ) : (
+                  <button className="btn btn-primary" type="button" onClick={handleStartRun}>
+                    {runBothInParallel ? 'Start Parallel Run' : 'Start Run'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
