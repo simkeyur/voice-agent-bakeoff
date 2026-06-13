@@ -23,11 +23,10 @@ from pipecat.processors.aggregators.llm_response_universal import LLMContextAggr
 from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
 
-from src.agent import SaffronLeafAgent
-from src.config import ProviderConfig, settings
-from src.manifest import RunManifest, TurnMetric, AggregateMetrics
-from src.providers.gemini import GeminiProviderAdapter
-from src.providers.openai import OpenAIProviderAdapter
+from voxarena.agent import Agent
+from voxarena.config import ProviderConfig, settings
+from voxarena.manifest import RunManifest, TurnMetric, AggregateMetrics
+from voxarena.providers import make_adapter
 
 class AudioInjectionProcessor(FrameProcessor):
     """Processor designed to stream raw PCM audio frames into the pipeline in real-time."""
@@ -133,10 +132,10 @@ class AudioCaptureProcessor(FrameProcessor):
         return output_path
 
 
-class SaffronLeafBakeoffHarness:
+class EvaluationHarness:
     """Manages the full automated execution of the 20-utterance test suite against a provider."""
     
-    def __init__(self, config: ProviderConfig, agent: SaffronLeafAgent, api_key: str, run_id: Optional[str] = None):
+    def __init__(self, config: ProviderConfig, agent: Agent, api_key: str, run_id: Optional[str] = None):
         self.config = config
         self.agent = agent
         self.api_key = api_key
@@ -163,17 +162,10 @@ class SaffronLeafBakeoffHarness:
             manifest_path=manifest_path
         )
         
-        # Instantiate correct Provider Adapter
-        if self.config.provider == "gemini":
-            self.adapter = GeminiProviderAdapter(
-                self.agent, self.config, self.manifest, self.api_key
-            )
-        elif self.config.provider == "openai":
-            self.adapter = OpenAIProviderAdapter(
-                self.agent, self.config, self.manifest, self.api_key
-            )
-        else:
-            raise ValueError(f"Unsupported provider: {self.config.provider}")
+        # Instantiate the registered adapter for this provider
+        self.adapter = make_adapter(
+            self.config.provider, self.agent, self.config, self.manifest, self.api_key
+        )
 
     def stop(self):
         """Request the session to stop prematurely."""
@@ -254,7 +246,7 @@ class SaffronLeafBakeoffHarness:
         # Start Pipecat pipeline task in background
         logger.info(f"[Harness] Starting pipeline runner task for {self.config.provider}...")
         self.manifest.status = "running"
-        self.manifest.save()
+        await self.manifest.save_async()
         
         runner_task = asyncio.create_task(runner.run(task))
         
@@ -346,14 +338,14 @@ class SaffronLeafBakeoffHarness:
             
             # Calculate aggregate metrics
             self.compile_aggregates()
-            self.manifest.save()
+            await self.manifest.save_async()
             logger.info(f"[Harness] Manifest saved to {self.manifest.manifest_path}")
-            
+
         except Exception as e:
             logger.error(f"[Harness] Run failed with exception: {e}")
             self.manifest.status = "failed"
             self.manifest.error_message = str(e)
-            self.manifest.save()
+            await self.manifest.save_async()
             if not runner_task.done():
                 await task.queue_frame(EndFrame())
                 await runner_task

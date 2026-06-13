@@ -1,35 +1,101 @@
-# Voice Agent Bake-off
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="ui/src/assets/logo-dark.png" />
+    <img src="ui/src/assets/logo.png" alt="VoxArena" width="220" />
+  </picture>
+</p>
+
+<p align="center"><em>An evaluation arena for realtime voice agents.</em></p>
+
+<p align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Built with Pipecat](https://img.shields.io/badge/built%20with-pipecat-9cf.svg)](https://github.com/pipecat-ai/pipecat)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 
-A reproducible **bake-off harness for realtime voice agents** — run the exact same scripted conversation against multiple realtime LLM providers (Google Gemini Live, OpenAI Realtime, and more via [Pipecat](https://github.com/pipecat-ai/pipecat)), and compare them side-by-side on latency, tool-call accuracy, transcript fidelity, and hallucinations.
+</p>
 
-One agent. One prompt. One tool schema. One set of pre-recorded audio scripts. Many providers, fairly compared.
+VoxArena is a reproducible benchmarking harness for realtime voice agents. Run the same scripted conversation across Gemini Live, OpenAI Realtime, and other [Pipecat](https://github.com/pipecat-ai/pipecat)-supported providers — and compare them apples-to-apples on latency, tool-call accuracy, and hallucinations.
+
+Drop it into your CI pipeline, your dev loop, or the bundled control panel.
 
 ---
 
-## Why
+## 🚀 CI & Pipeline Integration
 
-Picking a realtime voice provider usually means re-implementing your agent for each vendor and eyeballing demo calls. This project keeps everything **except the provider** constant — same system prompt, same tools, same scripted audio inputs — and automatically scores each run against expected tool calls and expected response content, so you get an apples-to-apples comparison.
+VoxArena ships a `voxarena` CLI designed for headless use in your build pipeline. It returns a non-zero exit code when metrics fall below thresholds you define, and emits JUnit XML for native CI reporting.
+
+```bash
+pip install voxarena
+
+voxarena run \
+  --provider gemini \
+  --script ./script/utterances.yaml \
+  --min-tool-accuracy 0.9 \
+  --max-hallucinations 0 \
+  --max-avg-ttfa-ms 1500 \
+  --output result.json \
+  --junit voxarena.xml
+# exit 0 if every threshold passes, 1 otherwise
+```
+
+### Compare two providers in one shot
+
+```bash
+voxarena compare \
+  --gemini-model gemini-3.1-flash-live-preview \
+  --openai-model gpt-realtime-2 \
+  --num-turns 5 \
+  --min-tool-accuracy 0.9 \
+  --output compare.json
+```
+
+### GitHub Actions
+
+```yaml
+- name: Voice agent regression check
+  env:
+    GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+  run: |
+    pip install voxarena
+    voxarena run --provider gemini \
+      --min-tool-accuracy 0.92 --max-hallucinations 0 \
+      --junit voxarena.xml --quiet
+
+- uses: mikepenz/action-junit-report@v4
+  if: always()
+  with:
+    report_paths: voxarena.xml
+```
+
+### Subcommands
+
+| Command | What it does |
+| --- | --- |
+| `voxarena run` | Single-provider scripted run; exits 0/1 against thresholds. |
+| `voxarena compare` | Runs Gemini and OpenAI in parallel against the same script. |
+| `voxarena report` | Generates a markdown comparison report from past runs. |
+
+Run `voxarena <command> --help` for the full flag set.
+
+---
 
 ## Features
 
-- 🎙️ **Provider-agnostic agent** — a single demo agent ("Saffron Leaf" restaurant assistant) driven through a shared [Pipecat](https://github.com/pipecat-ai/pipecat) pipeline
-- 🔁 **Scripted conversations** — define multi-turn conversations as pre-recorded WAV inputs + expected tool calls/responses in YAML
-- 📊 **Automated scoring** — tool-call correctness, response-content matching, hallucination counting, time-to-first-audio, interruption-stop latency
-- 🆚 **Side-by-side comparisons** — run Gemini Live and OpenAI Realtime in parallel against the same script
-- 🗄️ **Persistent run history** — every run is saved as a JSON manifest and indexed in SQLite
-- 🖥️ **Web control panel** — React UI to launch runs, watch live status, browse results in a sortable table, and tweak models/utterances from a Settings screen
+- 🎙️ **Provider-agnostic agent** — one Pipecat pipeline drives every provider; swap models without re-implementing your agent
+- 🔁 **Scripted conversations** — multi-turn YAML scripts with pre-recorded WAV inputs and expected tool calls / response content
+- 📊 **Automated scoring** — tool-call correctness, response matching, hallucination counts, time-to-first-audio, interruption-stop latency
+- 🆚 **Side-by-side comparisons** — run multiple providers in parallel against the same script
+- 🗄️ **Persistent run history** — JSON manifests on disk, indexed in SQLite
+- 🖥️ **Web control panel** — React UI to launch runs, watch live status, browse results, and edit scripts
 - 🧩 **Extensible** — add a new provider by implementing one adapter class
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A["Recorded WAVs<br/>script/audio/*.wav"] --> B["Injection Harness<br/>src/harness.py"]
+    A["Recorded WAVs<br/>script/audio/*.wav"] --> B["Injection Harness<br/>voxarena/harness.py"]
     B --> C
 
     subgraph C ["Pipecat Pipeline"]
@@ -47,7 +113,7 @@ flowchart TD
     C4 --> E["Run Manifest<br/>results/PROVIDER/RUN_ID/manifest.json"]
     E --> F[("SQLite Index<br/>runs.db")]
 
-    F <--> G["FastAPI Backend<br/>src/main.py"]
+    F <--> G["voxarena CLI<br/>+ FastAPI Backend"]
     G <--> H["React Control Panel<br/>ui/"]
 
     style D1 fill:#4285F4,color:#fff,stroke:#333
@@ -57,83 +123,39 @@ flowchart TD
     style H fill:#fff7da,stroke:#333
 ```
 
-- **`src/agent.py`** — the shared agent definition (system prompt + tool schemas), versioned and hashed for reproducibility
-- **`src/providers/`** — per-vendor adapters (`gemini.py`, `openai.py`) that wrap each Pipecat realtime LLM service behind a common interface, plus shared `RunMetricsCollector` scoring logic in `base.py`
-- **`src/harness.py`** — drives a scripted conversation through the pipeline: injects audio turn-by-turn, captures responses, scores them against expectations
-- **`src/main.py`** — FastAPI backend exposing run management, results, and settings endpoints
-- **`ui/`** — React + Vite control panel
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+ (for the UI)
-- API keys for at least one provider: [Google AI Studio](https://aistudio.google.com/) (Gemini) and/or [OpenAI](https://platform.openai.com/) (Realtime API)
-
-### 1. Clone and configure
+## Local Dev (with UI)
 
 ```bash
-git clone https://github.com/<your-org>/voice-agent-bakeoff.git
-cd voice-agent-bakeoff
-cp .env.example .env
-# edit .env and add your GOOGLE_API_KEY / OPENAI_API_KEY
+git clone https://github.com/<your-org>/voxarena.git
+cd voxarena
+cp .env.example .env  # add GOOGLE_API_KEY / OPENAI_API_KEY
+
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+
+uvicorn voxarena.main:app --reload --port 8000
 ```
 
-### 2. Backend setup
+Then in another terminal:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-uvicorn src.main:app --reload --port 8000
+cd ui && npm install && npm run dev
 ```
 
-### 3. Frontend setup
+Open the control panel at `http://localhost:5173`.
 
-```bash
-cd ui
-npm install
-npm run dev
-```
+## Bring Your Own Agent
 
-The control panel runs at `http://localhost:5173` and talks to the API at `http://localhost:8000`.
+The demo ships with the "Saffron Leaf" restaurant agent so you can run end-to-end on day one. To evaluate your own:
 
-### 4. Run a bake-off
-
-From the UI:
-
-1. Pick a provider/model (or check "Run both in parallel" to compare Gemini and OpenAI side-by-side)
-2. Choose how many conversation turns to run
-3. Click **Start Run** and watch live status
-4. Open the completed run to see per-turn results — transcript, tool calls, latency, pass/fail, and audio playback
-
-Or via the API directly:
-
-```bash
-curl -X POST http://localhost:8000/api/run \
-  -H "Content-Type: application/json" \
-  -d '{"provider": "gemini", "model": "gemini-3.1-flash-live-preview", "transport": "direct-injection", "num_turns": 5}'
-```
-
-## Configuration
-
-All configuration lives in `.env` (see `.env.example`):
-
-| Variable | Description |
-| --- | --- |
-| `GOOGLE_API_KEY` | API key for Gemini Live |
-| `OPENAI_API_KEY` | API key for OpenAI Realtime |
-| `GEMINI_MODEL` / `OPENAI_MODEL` | Realtime model used for the agent under test |
-| `GEMINI_EVAL_MODEL` / `OPENAI_EVAL_MODEL` | Cheaper text models used for grading/eval |
-| `PORT` | FastAPI server port |
-
-Model names and the scripted conversation (`script/utterances.yaml`) can also be edited live from the **Settings** screen in the UI.
+1. Replace the system prompt and tool schemas in `voxarena/agent.py`
+2. Implement (or stub) your tools in `voxarena/tools.py`
+3. Re-record `script/audio/*.wav` and update `script/utterances.yaml` to reflect your real workload
+4. Run the arena as normal — every provider gets scored against your scripts
 
 ## Scripted Conversations
 
-Conversations are defined in [`script/utterances.yaml`](script/utterances.yaml) as a list of turns, each with audio input and an `expect` block describing the correct tool call and/or response content:
+Conversations live in [`script/utterances.yaml`](script/utterances.yaml). Each turn pairs an utterance id with an `expect` block describing the correct tool call and/or response content:
 
 ```yaml
 - id: u04
@@ -146,30 +168,24 @@ Conversations are defined in [`script/utterances.yaml`](script/utterances.yaml) 
       - "closed"
 ```
 
-The harness plays the corresponding `script/audio/{id}.wav` file into the pipeline and scores the agent's actual tool calls and transcript against `expect`.
+The harness plays `script/audio/{id}.wav` into the pipeline and scores the agent's actual tool calls and transcript against `expect`.
 
-## Project Structure
+## Configuration
 
-```text
-.
-├── src/                # FastAPI backend, harness, providers, agent, tools
-├── ui/                 # React control panel
-├── script/             # Scripted utterances + audio inputs
-├── results/            # Run manifests (JSON) + SQLite index (gitignored)
-├── spec/               # Design spec and contracts
-└── requirements.txt
-```
+| Variable | Description |
+| --- | --- |
+| `GOOGLE_API_KEY` / `OPENAI_API_KEY` | Provider credentials |
+| `GEMINI_MODEL` / `OPENAI_MODEL` | Realtime model under test |
+| `GEMINI_EVAL_MODEL` / `OPENAI_EVAL_MODEL` | Cheaper text models for grading |
+| `PORT` | FastAPI server port |
+| `BASE_DIR` | Override workdir (CLI: `--workdir`) |
 
 ## Contributing
 
-Contributions are welcome! To add a new provider:
-
-1. Implement an adapter in `src/providers/` following the pattern in `gemini.py` / `openai.py`
-2. Wire it into `src/harness.py` and `src/config.py`
-3. Submit a PR
+To add a new provider: implement an adapter in `voxarena/providers/` following the pattern in `gemini.py` / `openai.py`, wire it into `voxarena/harness.py` and `voxarena/config.py`, and open a PR.
 
 For bugs and feature requests, please open an issue.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE).

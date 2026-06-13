@@ -9,7 +9,7 @@ Provide a thin control panel for launching runs, inspecting results, and compari
 - Minimal black-and-white visual system.
 - Dense information, low decoration.
 - Fast to scan, easy to compare, no unnecessary chrome.
-- The UI is a viewer and controller for the bakeoff, not the owner of the agent logic.
+- The UI is a viewer and controller for the arena, not the owner of the agent logic.
 
 ## Primary Surfaces
 

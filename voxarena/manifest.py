@@ -65,18 +65,39 @@ class RunManifest(BaseModel):
     manifest_path: Optional[str] = None
 
     def save(self):
+        """Synchronous save: writes JSON to disk and upserts into SQLite.
+
+        Safe to call from sync code or from async code that already accepts the brief
+        event-loop blocking. Async hot paths (e.g. the harness mid-session) should
+        prefer :meth:`save_async` which offloads the SQLite write to a thread.
+        """
         if not self.manifest_path:
             raise ValueError("manifest_path must be set to save the manifest.")
-        
-        # Save JSON to disk
+
         os.makedirs(os.path.dirname(self.manifest_path), exist_ok=True)
         with open(self.manifest_path, "w") as f:
             f.write(self.model_dump_json(indent=2))
-            
-        # Also save to SQLite DB
+
         try:
-            from src.database import save_run_manifest
+            from voxarena.database import save_run_manifest
             save_run_manifest(self)
+        except Exception as e:
+            from loguru import logger
+            logger.error(f"Failed to save manifest to SQLite database: {e}")
+
+    async def save_async(self):
+        """Async save — JSON dump inline (cheap), SQLite write off the event loop."""
+        import asyncio
+        if not self.manifest_path:
+            raise ValueError("manifest_path must be set to save the manifest.")
+
+        os.makedirs(os.path.dirname(self.manifest_path), exist_ok=True)
+        with open(self.manifest_path, "w") as f:
+            f.write(self.model_dump_json(indent=2))
+
+        try:
+            from voxarena.database import save_run_manifest
+            await asyncio.to_thread(save_run_manifest, self)
         except Exception as e:
             from loguru import logger
             logger.error(f"Failed to save manifest to SQLite database: {e}")

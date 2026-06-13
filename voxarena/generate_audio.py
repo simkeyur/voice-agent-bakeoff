@@ -1,7 +1,7 @@
 import os
 import yaml
 from loguru import logger
-from src.config import settings
+from voxarena.config import settings
 
 def generate_tts_openai(text: str, output_path: str, api_key: str):
     """Generate TTS audio using OpenAI's API."""
@@ -76,7 +76,7 @@ def main():
     import sys
     import argparse
     
-    parser = argparse.ArgumentParser(description="Generate TTS audio files for the voice agent bake-off.")
+    parser = argparse.ArgumentParser(description="Generate TTS audio files for VoxArena scripted runs.")
     parser.add_argument("--use-mac-tts", action="store_true", help="Force use of macOS built-in 'say' command.")
     args, _ = parser.parse_known_args()
     

@@ -1,6 +1,6 @@
 # Spec Index
 
-This folder contains the working spec for the voice-agent bakeoff. Keep these files focused and stable so the coding agent can use them as direct implementation context.
+This folder contains the working spec for VoxArena. Keep these files focused and stable so the coding agent can use them as direct implementation context.
 
 ## Files
 

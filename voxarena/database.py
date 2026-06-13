@@ -3,22 +3,47 @@ import sqlite3
 import json
 from typing import List, Dict, Any, Optional
 from loguru import logger
-from src.config import settings
-from src.manifest import RunManifest, TurnMetric, AggregateMetrics
+from voxarena.config import settings
+from voxarena.manifest import RunManifest, TurnMetric, AggregateMetrics
 
 DB_PATH = os.path.join(settings.RESULTS_DIR, "runs.db")
+
+_INITIALIZED = False
+
 
 def get_db_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def _ensure_initialized() -> None:
+    """Lazy init for callers that don't go through the FastAPI lifespan (e.g. the CLI)."""
+    global _INITIALIZED
+    if not _INITIALIZED:
+        init_db()
+        _INITIALIZED = True
+
 def init_db():
     """Initialize the database and create tables if they do not exist."""
+    global _INITIALIZED
     logger.info(f"Initializing SQLite database at {DB_PATH}")
     with get_db_connection() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
-        
+
+        # One-shot migration: legacy turns table had an AUTOINCREMENT `id` column
+        # and no composite primary key. Drop both tables so the new schema below
+        # is created cleanly and the startup backfill repopulates from JSON manifests.
+        try:
+            legacy_cols = {row["name"] for row in conn.execute("PRAGMA table_info(turns);").fetchall()}
+            if legacy_cols and "id" in legacy_cols:
+                logger.warning("Detected legacy turns schema; dropping for migration to composite PK.")
+                conn.execute("DROP TABLE IF EXISTS turns;")
+                conn.execute("DROP TABLE IF EXISTS runs;")
+                conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Create runs table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -37,11 +62,10 @@ def init_db():
                 metrics TEXT
             );
         """)
-        
-        # Create turns table
+
+        # Create turns table — (run_id, utterance_id) is the natural identity used by UPSERT
         conn.execute("""
             CREATE TABLE IF NOT EXISTS turns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id TEXT NOT NULL,
                 utterance_id TEXT NOT NULL,
                 text_input TEXT NOT NULL,
@@ -61,6 +85,7 @@ def init_db():
                 evaluation_notes TEXT,
                 response_match INTEGER,
                 evaluation_passed INTEGER,
+                PRIMARY KEY (run_id, utterance_id),
                 FOREIGN KEY (run_id) REFERENCES runs (run_id) ON DELETE CASCADE
             );
         """)
@@ -73,13 +98,27 @@ def init_db():
             conn.execute("ALTER TABLE turns ADD COLUMN evaluation_passed INTEGER;")
 
         conn.commit()
+    _INITIALIZED = True
     logger.success("SQLite database initialized successfully.")
 
+def _bool_or_none(v) -> Optional[int]:
+    if v is True:
+        return 1
+    if v is False:
+        return 0
+    return None
+
+
 def save_run_manifest(manifest: RunManifest):
-    """Save or update a RunManifest in SQLite."""
+    """Save or update a RunManifest in SQLite using per-turn UPSERT.
+
+    Avoids the previous delete-all-then-reinsert pattern which produced O(N^2)
+    writes when the harness called manifest.save() after every turn.
+    """
+    _ensure_initialized()
     with get_db_connection() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
-        
+
         # Insert or update run
         metrics_json = json.dumps(manifest.metrics.model_dump()) if manifest.metrics else None
         conn.execute("""
@@ -99,36 +138,59 @@ def save_run_manifest(manifest: RunManifest):
             manifest.tool_schema_hash, manifest.created_at, manifest.completed_at,
             manifest.status, manifest.error_message, metrics_json
         ))
-        
-        # For turns, we delete and re-insert
-        conn.execute("DELETE FROM turns WHERE run_id = ?;", (manifest.run_id,))
-        
-        for turn in manifest.turns:
-            tool_correct = 1 if turn.tool_call_correct is True else (0 if turn.tool_call_correct is False else None)
-            tool_details = json.dumps(turn.tool_call_details) if turn.tool_call_details else None
-            response_match = 1 if turn.response_match is True else (0 if turn.response_match is False else None)
-            evaluation_passed = 1 if turn.evaluation_passed is True else (0 if turn.evaluation_passed is False else None)
 
-            conn.execute("""
-                INSERT INTO turns (
-                    run_id, utterance_id, text_input, audio_input_path, transcript_output,
-                    audio_output_path, input_sent_at, first_audio_received_at,
-                    audio_completed_received_at, interruption_sent_at, interruption_stopped_at,
-                    time_to_first_audio_ms, interruption_stop_latency_ms, tool_call_correct,
-                    tool_call_details, hallucination_count, evaluation_notes,
-                    response_match, evaluation_passed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
+        # UPSERT each turn keyed by (run_id, utterance_id)
+        turn_rows = [
+            (
                 manifest.run_id, turn.utterance_id, turn.text_input, turn.audio_input_path,
                 turn.transcript_output, turn.audio_output_path, turn.input_sent_at,
                 turn.first_audio_received_at, turn.audio_completed_received_at,
                 turn.interruption_sent_at, turn.interruption_stopped_at,
                 turn.time_to_first_audio_ms, turn.interruption_stop_latency_ms,
-                tool_correct, tool_details, turn.hallucination_count, turn.evaluation_notes,
+                _bool_or_none(turn.tool_call_correct),
+                json.dumps(turn.tool_call_details) if turn.tool_call_details else None,
+                turn.hallucination_count, turn.evaluation_notes,
+                _bool_or_none(turn.response_match), _bool_or_none(turn.evaluation_passed),
+            )
+            for turn in manifest.turns
+        ]
+
+        conn.executemany("""
+            INSERT INTO turns (
+                run_id, utterance_id, text_input, audio_input_path, transcript_output,
+                audio_output_path, input_sent_at, first_audio_received_at,
+                audio_completed_received_at, interruption_sent_at, interruption_stopped_at,
+                time_to_first_audio_ms, interruption_stop_latency_ms, tool_call_correct,
+                tool_call_details, hallucination_count, evaluation_notes,
                 response_match, evaluation_passed
-            ))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id, utterance_id) DO UPDATE SET
+                text_input = excluded.text_input,
+                audio_input_path = excluded.audio_input_path,
+                transcript_output = excluded.transcript_output,
+                audio_output_path = excluded.audio_output_path,
+                input_sent_at = excluded.input_sent_at,
+                first_audio_received_at = excluded.first_audio_received_at,
+                audio_completed_received_at = excluded.audio_completed_received_at,
+                interruption_sent_at = excluded.interruption_sent_at,
+                interruption_stopped_at = excluded.interruption_stopped_at,
+                time_to_first_audio_ms = excluded.time_to_first_audio_ms,
+                interruption_stop_latency_ms = excluded.interruption_stop_latency_ms,
+                tool_call_correct = excluded.tool_call_correct,
+                tool_call_details = excluded.tool_call_details,
+                hallucination_count = excluded.hallucination_count,
+                evaluation_notes = excluded.evaluation_notes,
+                response_match = excluded.response_match,
+                evaluation_passed = excluded.evaluation_passed;
+        """, turn_rows)
         conn.commit()
     logger.debug(f"Saved run manifest {manifest.run_id} to SQLite database.")
+
+
+async def save_run_manifest_async(manifest: RunManifest) -> None:
+    """Async wrapper for save_run_manifest — call from async code to keep the event loop responsive."""
+    import asyncio
+    await asyncio.to_thread(save_run_manifest, manifest)
 
 def load_run_manifest(run_id: str) -> Optional[RunManifest]:
     """Load a RunManifest by ID from SQLite."""
@@ -137,7 +199,10 @@ def load_run_manifest(run_id: str) -> Optional[RunManifest]:
         if not run_row:
             return None
             
-        turn_rows = conn.execute("SELECT * FROM turns WHERE run_id = ? ORDER BY id ASC;", (run_id,)).fetchall()
+        turn_rows = conn.execute(
+            "SELECT * FROM turns WHERE run_id = ? ORDER BY input_sent_at ASC;",
+            (run_id,),
+        ).fetchall()
         
         turns = []
         for row in turn_rows:
@@ -235,6 +300,12 @@ def list_run_summaries() -> List[Dict[str, Any]]:
                 "aggregate_metrics": metrics_dict
             })
         return runs
+
+def list_run_ids() -> List[str]:
+    """Return all known run_ids — cheap helper for incremental backfill."""
+    with get_db_connection() as conn:
+        return [row["run_id"] for row in conn.execute("SELECT run_id FROM runs;").fetchall()]
+
 
 def delete_run_from_db(run_id: str):
     """Delete a run and cascade delete turns from SQLite."""

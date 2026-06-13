@@ -1,5 +1,6 @@
 import os
 import glob
+from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,13 +9,34 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from loguru import logger
 
-from src.config import settings
-from src.manifest import RunManifest
+from voxarena.config import settings
+from voxarena.manifest import RunManifest
+from voxarena.providers import provider_names, api_key_env
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from voxarena.database import init_db, save_run_manifest, list_run_ids
+    init_db()
+
+    # Incrementally backfill any manifests that aren't yet in SQLite.
+    known_ids = set(list_run_ids())
+    manifest_files = glob.glob(os.path.join(settings.RESULTS_DIR, "**", "manifest.json"), recursive=True)
+    for file_path in manifest_files:
+        try:
+            manifest = RunManifest.load(file_path)
+            if manifest.run_id not in known_ids:
+                save_run_manifest(manifest)
+        except Exception as e:
+            logger.error(f"Failed to backfill manifest at {file_path}: {e}")
+    yield
+
 
 app = FastAPI(
-    title="Voice Agent Bake-off API",
-    description="Backend service for controlling runs and evaluating voice agents",
-    version="1.0"
+    title="VoxArena API",
+    description="Backend service for controlling runs and evaluating realtime voice agents",
+    version="1.0",
+    lifespan=lifespan,
 )
 
 # CORS middleware for development frontend access
@@ -28,11 +50,16 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "service": "voice-agent-bakeoff"}
+    return {"status": "healthy", "service": "voxarena"}
+
+def _api_key_for(provider: str) -> Optional[str]:
+    return os.environ.get(api_key_env(provider)) or getattr(settings, api_key_env(provider), None)
+
 
 @app.get("/api/config")
 async def get_config():
     """Retrieve global directory settings and credentials availability (without exposing raw keys)."""
+    providers = provider_names()
     return {
         "results_dir": settings.RESULTS_DIR,
         "script_dir": settings.SCRIPT_DIR,
@@ -40,10 +67,11 @@ async def get_config():
         "review_dir": settings.REVIEW_DIR,
         "has_google_key": bool(settings.GOOGLE_API_KEY),
         "has_openai_key": bool(settings.OPENAI_API_KEY),
-        "providers": ["gemini", "openai"],
+        "providers": providers,
+        "has_api_key": {p: bool(_api_key_for(p)) for p in providers},
         "transports": ["direct-injection", "webrtc-local"],
         "gemini_model": settings.GEMINI_MODEL,
-        "openai_model": settings.OPENAI_MODEL
+        "openai_model": settings.OPENAI_MODEL,
     }
 
 class SettingsUpdateRequest(BaseModel):
@@ -121,24 +149,10 @@ async def update_utterances(req: UtterancesUpdateRequest):
 
     return {"status": "saved", "count": len(parsed)}
 
-@app.on_event("startup")
-async def startup_event():
-    from src.database import init_db, save_run_manifest
-    init_db()
-    
-    # Backfill runs on disk into SQLite
-    manifest_files = glob.glob(os.path.join(settings.RESULTS_DIR, "**", "manifest.json"), recursive=True)
-    for file_path in manifest_files:
-        try:
-            manifest = RunManifest.load(file_path)
-            save_run_manifest(manifest)
-        except Exception as e:
-            logger.error(f"Failed to backfill manifest at {file_path}: {e}")
-
 @app.get("/api/runs", response_model=List[Dict[str, Any]])
 async def list_runs():
     """Retrieve all run summaries from SQLite database."""
-    from src.database import list_run_summaries
+    from voxarena.database import list_run_summaries
     try:
         return list_run_summaries()
     except Exception as e:
@@ -148,7 +162,7 @@ async def list_runs():
 @app.get("/api/runs/{run_id}", response_model=RunManifest)
 async def get_run(run_id: str):
     """Retrieve details for a single run from SQLite database."""
-    from src.database import load_run_manifest
+    from voxarena.database import load_run_manifest
     try:
         manifest = load_run_manifest(run_id)
         if manifest:
@@ -160,9 +174,8 @@ async def get_run(run_id: str):
     raise HTTPException(status_code=404, detail=f"Run manifest with ID {run_id} not found.")
 
 from fastapi import BackgroundTasks
-from src.agent import SaffronLeafAgent
-from src.config import ProviderConfig
-from src.harness import SaffronLeafBakeoffHarness
+from voxarena import runner
+from voxarena.runner import ACTIVE_HARNESSES, create_pending_manifest
 
 class RunRequest(BaseModel):
     provider: str
@@ -171,59 +184,34 @@ class RunRequest(BaseModel):
     num_turns: Optional[int] = None
 
 class CompareRunRequest(BaseModel):
-    gemini_model: str
-    openai_model: str
     transport: str
     num_turns: Optional[int] = None
-
-# Keep track of active run harnesses to allow stopping them
-active_harnesses: Dict[str, SaffronLeafBakeoffHarness] = {}
+    # New generic shape: dict of provider -> model id (None means use that provider's default)
+    models: Optional[Dict[str, Optional[str]]] = None
+    # Back-compat fields for the existing UI / clients
+    gemini_model: Optional[str] = None
+    openai_model: Optional[str] = None
 
 async def run_bakeoff_in_background(provider: str, model: str, transport: str, run_id: str, num_turns: Optional[int] = None):
+    """Thin wrapper that swallows runner.run_evaluation's exception so the
+    BackgroundTask coroutine doesn't bubble an unhandled error."""
     try:
-        agent = SaffronLeafAgent()
-        config = ProviderConfig(provider=provider, model=model, transport=transport)
+        await runner.run_evaluation(provider, model, transport, run_id, num_turns)
+    except Exception:
+        # runner already logged and marked the manifest as failed
+        pass
 
-        # Determine active key
-        api_key = settings.GOOGLE_API_KEY if provider == "gemini" else settings.OPENAI_API_KEY
-        if not api_key:
-            # Fallback to dummy key if none set
-            api_key = "dummy-key-for-testing"
-
-        harness = SaffronLeafBakeoffHarness(config, agent, api_key, run_id)
-        active_harnesses[run_id] = harness
-
-        # Search for utterances in project script folder
-        utterances_file = os.path.join(settings.SCRIPT_DIR, "utterances.yaml")
-        await harness.run_session(utterances_file if os.path.exists(utterances_file) else None, num_turns=num_turns)
-    except Exception as e:
-        logger.error(f"Background run {run_id} failed: {e}")
-    finally:
-        active_harnesses.pop(run_id, None)
-
-def create_pending_manifest(provider: str, model: str, transport: str, run_id: str) -> None:
-    """Persist a placeholder 'pending' manifest immediately so the run is visible to clients
-    before the background task has had a chance to initialize the pipeline."""
-    agent = SaffronLeafAgent()
-    run_dir = os.path.join(settings.RESULTS_DIR, provider, run_id)
-    os.makedirs(run_dir, exist_ok=True)
-    manifest = RunManifest(
-        run_id=run_id,
-        provider=provider,
-        model=model,
-        transport=transport,
-        prompt_version=agent.prompt_version,
-        prompt_hash=agent.prompt_hash,
-        tool_schema_version=agent.tool_schema_version,
-        tool_schema_hash=agent.tool_schema_hash,
-        manifest_path=os.path.join(run_dir, "manifest.json"),
-        status="pending"
-    )
-    manifest.save()
+def _require_api_key(provider: str) -> None:
+    if not _api_key_for(provider):
+        raise HTTPException(
+            status_code=400,
+            detail=f"No API key configured for '{provider}'. Set {api_key_env(provider)} in .env.",
+        )
 
 @app.post("/api/run")
 async def start_run(req: RunRequest, background_tasks: BackgroundTasks):
     import time
+    _require_api_key(req.provider)
     run_id = f"run_{int(time.time())}"
     create_pending_manifest(req.provider, req.model, req.transport, run_id)
     background_tasks.add_task(
@@ -238,35 +226,58 @@ async def start_run(req: RunRequest, background_tasks: BackgroundTasks):
 
 @app.post("/api/run/compare")
 async def start_compare_run(req: CompareRunRequest, background_tasks: BackgroundTasks):
-    """Kick off a Gemini run and an OpenAI run in parallel for side-by-side comparison."""
+    """Kick off N provider runs in parallel for side-by-side comparison."""
     import time
+
+    # Resolve provider -> model map. Prefer new shape; fall back to legacy fields.
+    if req.models:
+        models = {p: m for p, m in req.models.items()}
+    else:
+        models = {}
+        if req.gemini_model is not None:
+            models["gemini"] = req.gemini_model
+        if req.openai_model is not None:
+            models["openai"] = req.openai_model
+
+    if len(models) < 2:
+        raise HTTPException(status_code=400, detail="compare needs at least two providers; pass 'models' or both legacy fields.")
+
+    registered = set(provider_names())
+    unknown = [p for p in models if p not in registered]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown provider(s) {unknown}. Registered: {sorted(registered)}")
+
+    for p in models:
+        _require_api_key(p)
+
     base = int(time.time())
-    gemini_run_id = f"run_{base}_gemini"
-    openai_run_id = f"run_{base}_openai"
+    run_ids: Dict[str, str] = {}
+    for provider, model in models.items():
+        resolved_model = model or getattr(settings, f"{provider.upper()}_MODEL", "")
+        run_id = f"run_{base}_{provider}"
+        run_ids[provider] = run_id
+        create_pending_manifest(provider, resolved_model, req.transport, run_id)
+        background_tasks.add_task(
+            run_bakeoff_in_background, provider, resolved_model, req.transport, run_id, req.num_turns
+        )
 
-    create_pending_manifest("gemini", req.gemini_model, req.transport, gemini_run_id)
-    create_pending_manifest("openai", req.openai_model, req.transport, openai_run_id)
-
-    background_tasks.add_task(
-        run_bakeoff_in_background, "gemini", req.gemini_model, req.transport, gemini_run_id, req.num_turns
-    )
-    background_tasks.add_task(
-        run_bakeoff_in_background, "openai", req.openai_model, req.transport, openai_run_id, req.num_turns
-    )
-
-    return {"status": "started", "gemini_run_id": gemini_run_id, "openai_run_id": openai_run_id}
+    # Return a generic mapping plus the legacy keys for clients that still expect them.
+    payload: Dict[str, Any] = {"status": "started", "run_ids": run_ids}
+    if "gemini" in run_ids:
+        payload["gemini_run_id"] = run_ids["gemini"]
+    if "openai" in run_ids:
+        payload["openai_run_id"] = run_ids["openai"]
+    return payload
 
 @app.post("/api/run/{run_id}/stop")
 async def stop_run(run_id: str):
-    harness = active_harnesses.get(run_id)
-    if not harness:
+    if not runner.stop_run(run_id):
         raise HTTPException(status_code=404, detail=f"Active run {run_id} not found or already completed.")
-    harness.stop()
     return {"status": "stop_requested", "run_id": run_id}
 
 @app.delete("/api/runs/{run_id}")
 async def delete_run(run_id: str):
-    from src.database import load_run_manifest, delete_run_from_db
+    from voxarena.database import load_run_manifest, delete_run_from_db
     import shutil
     try:
         manifest = load_run_manifest(run_id)
@@ -275,9 +286,9 @@ async def delete_run(run_id: str):
         raise HTTPException(status_code=500, detail=f"Database error loading run: {e}")
     if not manifest:
         raise HTTPException(status_code=404, detail=f"Run manifest with ID {run_id} not found.")
-    if run_id in active_harnesses:
-        active_harnesses[run_id].stop()
-        active_harnesses.pop(run_id, None)
+    if run_id in ACTIVE_HARNESSES:
+        runner.stop_run(run_id)
+        ACTIVE_HARNESSES.pop(run_id, None)
     run_dir = os.path.join(settings.RESULTS_DIR, manifest.provider, run_id)
     if os.path.exists(run_dir):
         try:
@@ -293,7 +304,7 @@ async def delete_run(run_id: str):
     return {"status": "deleted", "run_id": run_id}
 
 
-from src.report_generator import generate_report
+from voxarena.report_generator import generate_report
 
 @app.post("/api/report")
 async def compile_report():

@@ -5,6 +5,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -18,9 +19,23 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMFullResponseEndFrame
 )
-from src.agent import SaffronLeafAgent
-from src.config import ProviderConfig
-from src.manifest import RunManifest, TurnMetric
+from voxarena.agent import Agent
+from voxarena.config import ProviderConfig
+from voxarena.manifest import RunManifest, TurnMetric
+from voxarena.tools import execute_tool
+
+
+async def shared_tool_callback(params: FunctionCallParams) -> None:
+    """Provider-agnostic function callback for handling tool calls from the realtime LLM."""
+    name = params.function_name
+    args = params.arguments
+    logger.info(f"[Tool] {name}({args})")
+    try:
+        result_str = execute_tool(name, args)
+        await params.result_callback({"result": result_str})
+    except Exception as e:
+        logger.error(f"[Tool] Error in {name}: {e}")
+        await params.result_callback({"error": str(e)})
 
 
 def _args_match(expected: Any, actual: Any) -> bool:
@@ -183,7 +198,7 @@ class RunMetricsCollector(FrameProcessor):
 class BaseProviderAdapter:
     """Abstract base class for Gemini Live and OpenAI Realtime Pipecat adapters."""
     
-    def __init__(self, agent: SaffronLeafAgent, config: ProviderConfig, manifest: RunManifest):
+    def __init__(self, agent: Agent, config: ProviderConfig, manifest: RunManifest):
         self.agent = agent
         self.config = config
         self.manifest = manifest
@@ -194,5 +209,6 @@ class BaseProviderAdapter:
         raise NotImplementedError("Subclasses must implement get_llm_service")
 
     def register_tools(self, service: Any) -> None:
-        """Register the shared restaurant tools with the service callbacks."""
-        raise NotImplementedError("Subclasses must implement register_tools")
+        """Wire every agent tool into the Pipecat service using the shared callback."""
+        for schema in self.agent.tool_schemas:
+            service.register_function(schema["name"], shared_tool_callback)

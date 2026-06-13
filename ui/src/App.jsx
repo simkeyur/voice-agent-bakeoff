@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Sun, Moon, Play, Pause, BarChart3, History, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
+import { Sun, Moon, Play, Pause, BarChart3, History, Settings } from 'lucide-react';
+import logoUrl from './assets/logo.png';
 import './App.css';
 
 function AudioPlayer({ src }) {
@@ -41,7 +42,6 @@ function AudioPlayer({ src }) {
 
 function App() {
   const [activeTab, setActiveTab] = useState('launcher');
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [backendConfig, setBackendConfig] = useState(null);
   const [backendStatus, setBackendStatus] = useState('checking');
   const [runs, setRuns] = useState([]);
@@ -386,7 +386,7 @@ function App() {
     <div className="app-container">
       <header className="header">
         <div className="header-title">
-          <span>Voice Agent Bakeoff</span>
+          <img src={logoUrl} alt="VoxArena" className="header-logo" />
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -396,72 +396,57 @@ function App() {
               {backendStatus === 'connected' ? 'API connected' : 'API disconnected'}
             </span>
           </div>
-          <button 
+          <button
             className="theme-toggle-btn"
             onClick={toggleTheme}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--fg)', padding: 4 }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg)' }}
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
         </div>
       </header>
 
       <div className="app-body">
-        <aside className={`sidebar ${isSidebarExpanded ? 'expanded' : ''}`}>
+        <aside className="sidebar">
           <nav className="sidebar-nav">
-            <button 
+            <button
               className={`sidebar-btn ${activeTab === 'launcher' ? 'active' : ''}`}
               onClick={() => setActiveTab('launcher')}
               title="Run Launcher"
+              aria-label="Run Launcher"
             >
               <Play size={18} />
-              <span>Run Launcher</span>
             </button>
-            <button 
+            <button
               className={`sidebar-btn ${activeTab === 'metrics' ? 'active' : ''}`}
               onClick={() => setActiveTab('metrics')}
               title="Metrics Showdown"
+              aria-label="Metrics Showdown"
             >
               <BarChart3 size={18} />
-              <span>Metrics Showdown</span>
             </button>
-            <button 
+            <button
               className={`sidebar-btn ${activeTab === 'history' ? 'active' : ''}`}
               onClick={() => {
                 setActiveTab('history');
                 setSelectedRunId(null);
               }}
               title="Results Browser"
+              aria-label="Results Browser"
             >
               <History size={18} />
-              <span>Results Browser</span>
             </button>
           </nav>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 'auto' }}>
-            <button
-              className={`sidebar-btn ${activeTab === 'settings' ? 'active' : ''}`}
-              onClick={() => setActiveTab('settings')}
-              title="Settings"
-              style={{ borderTop: '1px solid var(--border)', borderRadius: 0, paddingTop: 12 }}
-            >
-              <Settings size={18} />
-              <span>Settings</span>
-            </button>
-            <div className="sidebar-footer" style={{ display: isSidebarExpanded ? 'block' : 'none' }}>
-              v1.0.0
-            </div>
-            <button
-              className="sidebar-btn toggle-expand-btn"
-              onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
-              title={isSidebarExpanded ? "Collapse Sidebar" : "Expand Sidebar"}
-              style={{ borderTop: '1px solid var(--border)', borderRadius: 0, paddingTop: 12 }}
-            >
-              {isSidebarExpanded ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
-              <span>Collapse Menu</span>
-            </button>
-          </div>
+
+          <button
+            className={`sidebar-btn ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('settings')}
+            title="Settings"
+            aria-label="Settings"
+          >
+            <Settings size={18} />
+          </button>
         </aside>
 
         <main className="main-content">

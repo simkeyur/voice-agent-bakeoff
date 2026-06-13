@@ -1,12 +1,22 @@
 import os
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ProviderConfig(BaseModel):
-    provider: Literal["gemini", "openai"] = "gemini"
+    provider: str = "gemini"
     model: str = "gemini-3.1-flash-live-preview"  # Concrete default model (voice/live)
     transport: Literal["direct-injection", "webrtc-local"] = "direct-injection"
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, v: str) -> str:
+        # Lazy import to avoid circular dependency (providers -> base -> ... -> config)
+        from voxarena.providers import provider_names
+        names = provider_names()
+        if v not in names:
+            raise ValueError(f"Unknown provider '{v}'. Registered: {names}")
+        return v
     run_id: Optional[str] = None
     prompt_version: str = "v1.0"
     tool_schema_version: str = "v1.0"

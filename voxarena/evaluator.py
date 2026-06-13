@@ -4,20 +4,25 @@ import yaml
 from typing import Dict, Any, List, Optional
 from loguru import logger
 
-from src.config import settings
-from src.manifest import RunManifest, TurnMetric
+from voxarena.config import settings
+from voxarena.manifest import RunManifest, TurnMetric
 
 class SaffronLeafEvaluator:
     """Uses LLM models to automatically evaluate run transcripts and tool calls against ground truth."""
     
     def __init__(self, api_key: Optional[str] = None, provider: str = "gemini"):
+        from voxarena.providers import api_key_env
         self.provider = provider
-        self.api_key = api_key or (settings.GOOGLE_API_KEY if provider == "gemini" else settings.OPENAI_API_KEY)
+        if api_key is None:
+            env_name = api_key_env(provider)
+            api_key = os.environ.get(env_name) or getattr(settings, env_name, None)
+        self.api_key = api_key
         
-        # Load static knowledge base
-        with open(os.path.join(settings.BASE_DIR, "src", "data", "menu.json"), "r") as f:
+        # Load static knowledge base from the bundled Saffron Leaf demo data
+        data_dir = os.path.join(os.path.dirname(__file__), "data", "saffron_leaf")
+        with open(os.path.join(data_dir, "menu.json"), "r") as f:
             self.menu_data = f.read()
-        with open(os.path.join(settings.BASE_DIR, "src", "data", "hours.json"), "r") as f:
+        with open(os.path.join(data_dir, "hours.json"), "r") as f:
             self.hours_data = f.read()
 
     def _call_llm_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:

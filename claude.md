@@ -1,4 +1,4 @@
-# Voice Agent Bake-Off Spec
+# VoxArena Spec
 
 This file is the entry point. The detailed spec now lives in the `spec/` folder so the coding agent can load smaller, focused context files.
 

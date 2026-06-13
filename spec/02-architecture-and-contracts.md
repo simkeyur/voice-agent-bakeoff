@@ -49,12 +49,12 @@ Every run should emit a manifest with at least:
 ## Repo Structure
 
 ```text
-voice-bakeoff/
+voxarena/
 ├── claude.md
 ├── spec/
 ├── pyproject.toml
 ├── .env.example
-├── src/
+├── voxarena/
 │   ├── agent.py
 │   ├── providers/
 │   │   ├── base.py

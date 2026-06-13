@@ -49,7 +49,7 @@ Exit criteria:
 
 ## Phase 3 - Reproducible harness
 
-Goal: make the bakeoff measurable and repeatable.
+Goal: make the arena measurable and repeatable.
 
 Deliverables:
 

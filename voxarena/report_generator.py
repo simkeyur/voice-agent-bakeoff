@@ -1,16 +1,51 @@
 import os
 import glob
-import json
-from typing import Dict, Any, List
+from typing import Any, Callable, Optional
 from loguru import logger
-from src.config import settings
-from src.manifest import RunManifest
+from voxarena.config import settings
+from voxarena.manifest import RunManifest
+from voxarena.providers import provider_names
 
-def generate_report():
+
+def _safe_mean(values: list[float]) -> Optional[float]:
+    vals = [v for v in values if v is not None]
+    return sum(vals) / len(vals) if vals else None
+
+
+def _stats_for(runs: list[RunManifest]) -> dict[str, Any]:
+    ttfa = _safe_mean([r.metrics.average_ttfa_ms for r in runs])
+    accuracy = _safe_mean([r.metrics.tool_call_accuracy_rate for r in runs])
+    interruption = _safe_mean([r.metrics.average_interruption_stop_latency_ms for r in runs])
+    halls = [r.metrics.hallucination_count or 0 for r in runs]
+    avg_hall = sum(halls) / len(halls) if halls else 0.0
+    return {
+        "count": len(runs),
+        "avg_ttfa_ms": ttfa,
+        "avg_accuracy": accuracy,
+        "avg_interruption_ms": interruption,
+        "avg_hallucinations": avg_hall,
+    }
+
+
+def _fmt(value: Optional[float], suffix: str = "", precision: int = 0) -> str:
+    return f"{value:.{precision}f}{suffix}" if value is not None else "—"
+
+
+def _winner(stats_by_provider: dict[str, dict[str, Any]], metric: str, lower_is_better: bool) -> str:
+    candidates = [(p, s[metric]) for p, s in stats_by_provider.items() if s[metric] is not None]
+    if not candidates:
+        return "—"
+    winner = min(candidates, key=lambda x: x[1]) if lower_is_better else max(candidates, key=lambda x: x[1])
+    return winner[0]
+
+
+def generate_report() -> None:
     logger.info("Generating comparative markdown report...")
-    manifest_files = glob.glob(os.path.join(settings.RESULTS_DIR, "**", "manifest.json"), recursive=True)
-    
-    runs = []
+    manifest_files = glob.glob(
+        os.path.join(settings.RESULTS_DIR, "**", "manifest.json"), recursive=True
+    )
+
+    runs: list[RunManifest] = []
     for file_path in manifest_files:
         try:
             manifest = RunManifest.load(file_path)
@@ -18,83 +53,74 @@ def generate_report():
                 runs.append(manifest)
         except Exception as e:
             logger.error(f"Failed to load manifest at {file_path}: {e}")
-            
-    # Group runs by provider
-    gemini_runs = [r for r in runs if r.provider == "gemini"]
-    openai_runs = [r for r in runs if r.provider == "openai"]
-    
-    def get_stats(p_runs):
-        if not p_runs:
-            return None
-        ttfas = [r.metrics.average_ttfa_ms for r in p_runs if r.metrics.average_ttfa_ms is not None]
-        accuracies = [r.metrics.tool_call_accuracy_rate for r in p_runs if r.metrics.tool_call_accuracy_rate is not None]
-        interruptions = [r.metrics.average_interruption_stop_latency_ms for r in p_runs if r.metrics.average_interruption_stop_latency_ms is not None]
-        hallucinations = [r.metrics.hallucination_count for r in p_runs if r.metrics.hallucination_count is not None]
-        
-        return {
-          "count": len(p_runs),
-          "avg_ttfa": sum(ttfas) / len(ttfas) if ttfas else None,
-          "avg_accuracy": sum(accuracies) / len(accuracies) if accuracies else None,
-          "avg_interruption": sum(interruptions) / len(interruptions) if interruptions else None,
-          "avg_hallucinations": sum(hallucinations) / len(p_runs)
-        }
-        
-    g_stats = get_stats(gemini_runs)
-    o_stats = get_stats(openai_runs)
-    
+
+    # Group by provider — include every registered provider so the table is consistent,
+    # even if a provider has zero completed runs.
+    providers = provider_names()
+    grouped: dict[str, list[RunManifest]] = {p: [] for p in providers}
+    for r in runs:
+        grouped.setdefault(r.provider, []).append(r)
+
+    stats_by_provider = {p: _stats_for(rs) for p, rs in grouped.items()}
+
+    # Build the comparison table
+    header = "| Provider | Runs | Avg TTFA | Tool Accuracy | Interruption | Hallucinations |"
+    divider = "| --- | --- | --- | --- | --- | --- |"
+    rows = [
+        f"| {p} | {s['count']} "
+        f"| {_fmt(s['avg_ttfa_ms'], ' ms')} "
+        f"| {_fmt((s['avg_accuracy'] or 0) * 100, '%', 1) if s['avg_accuracy'] is not None else '—'} "
+        f"| {_fmt(s['avg_interruption_ms'], ' ms')} "
+        f"| {_fmt(s['avg_hallucinations'], ' per run', 1)} |"
+        for p, s in stats_by_provider.items()
+    ]
+    comparison_table = "\n".join([header, divider, *rows])
+
+    # Per-metric winners (only meaningful if at least 2 providers have data)
+    populated = {p: s for p, s in stats_by_provider.items() if s["count"] > 0}
+    if len(populated) >= 2:
+        winners = (
+            f"- **Lowest TTFA:** `{_winner(populated, 'avg_ttfa_ms', lower_is_better=True)}`\n"
+            f"- **Highest tool accuracy:** `{_winner(populated, 'avg_accuracy', lower_is_better=False)}`\n"
+            f"- **Lowest interruption latency:** `{_winner(populated, 'avg_interruption_ms', lower_is_better=True)}`\n"
+            f"- **Fewest hallucinations:** `{_winner(populated, 'avg_hallucinations', lower_is_better=True)}`"
+        )
+    else:
+        winners = "_Not enough providers with completed runs to declare per-metric winners._"
+
     analysis_dir = os.path.join(settings.BASE_DIR, "analysis")
     os.makedirs(analysis_dir, exist_ok=True)
     report_path = os.path.join(analysis_dir, "report.md")
-    
-    report_content = f"""# Saffron Leaf Voice Agent Bake-off Report
 
-This report presents a head-to-head comparison of Gemini Live and OpenAI Realtime voice agent implementations for Saffron Leaf restaurant ( vegetarian, onion-free, and garlic-free).
+    report_content = f"""# VoxArena Comparative Report
 
----
+Head-to-head comparison of registered realtime voice providers across all completed runs in `results/`.
 
-## Executive Summary
+## Comparison Table
 
-| Metric | Google Gemini Live | OpenAI Realtime | Recommendation / Winner |
-| :--- | :--- | :--- | :--- |
-| **Completed Runs** | {g_stats['count'] if g_stats else 0} | {o_stats['count'] if o_stats else 0} | -- |
-| **Avg Latency (TTFA)** | {f"{g_stats['avg_ttfa']:.0f} ms" if g_stats and g_stats['avg_ttfa'] else "N/A"} | {f"{o_stats['avg_ttfa']:.0f} ms" if o_stats and o_stats['avg_ttfa'] else "N/A"} | { "Gemini" if g_stats and o_stats and g_stats['avg_ttfa'] < o_stats['avg_ttfa'] else "OpenAI" } |
-| **Tool Call Accuracy** | {f"{g_stats['avg_accuracy']*100:.1f}%" if g_stats and g_stats['avg_accuracy'] is not None else "N/A"} | {f"{o_stats['avg_accuracy']*100:.1f}%" if o_stats and o_stats['avg_accuracy'] is not None else "N/A"} | { "Gemini" if g_stats and o_stats and g_stats['avg_accuracy'] > o_stats['avg_accuracy'] else "OpenAI" } |
-| **Interruption Latency** | {f"{g_stats['avg_interruption']:.0f} ms" if g_stats and g_stats['avg_interruption'] else "N/A"} | {f"{o_stats['avg_interruption']:.0f} ms" if o_stats and o_stats['avg_interruption'] else "N/A"} | { "Gemini" if g_stats and o_stats and g_stats['avg_interruption'] < o_stats['avg_interruption'] else "OpenAI" } |
-| **Hallucination Count** | {f"{g_stats['avg_hallucinations']:.1f} per run" if g_stats else "N/A"} | {f"{o_stats['avg_hallucinations']:.1f} per run" if o_stats else "N/A"} | { "Gemini" if g_stats and o_stats and g_stats['avg_hallucinations'] < o_stats['avg_hallucinations'] else "OpenAI" } |
+{comparison_table}
 
----
+## Per-Metric Winners
 
-## Metric Analysis
+{winners}
 
-### 1. Latency (Time-To-First-Audio)
-Time-To-First-Audio (TTFA) measures the duration from the end of the user's speech until the bot emits its first audio chunk.
-* **Gemini Live:** Runs on Google's low-latency streaming infrastructure. Usually yields near-instant response feedback.
-* **OpenAI Realtime:** Leverages direct WebSockets.
+## Metric Definitions
 
-### 2. Turn-level Interruption Stop Latency
-Measures the duration the bot continues to stream audio output after the user begins speaking.
-* A low interruption stop latency ensures that users can conversationalize naturally without the bot "overtalking" them.
-
-### 3. Tool Accuracy
-Evaluates if the LLM correctly triggers tools like `lookup_menu(category)`, `get_hours(day)`, and `check_reservation_availability(date, time, party_size)` with correct arguments.
-
----
-
-## Facts Compliance & Constraint Checks
-* **Vegetarian Compliance:** The models are evaluated on whether they correctly reject requests for meat dishes (e.g. Chicken Tikka).
-* **Onion & Garlic Constraints:** The models must refuse customization options that ask for garlic/onion adjustments.
-* **Reservation Capacity Constraints:** Evaluates if the agent rejects party sizes larger than 12.
-
----
+- **Avg TTFA** — mean time-to-first-audio in milliseconds. Lower is better.
+- **Tool Accuracy** — percentage of expected tool calls that were correctly invoked.
+- **Interruption** — mean time the bot kept speaking after the user interrupted. Lower is better.
+- **Hallucinations** — mean number of hallucinated facts per run (graded against ground-truth knowledge base).
 
 ## Detailed Run Reference
-For comprehensive logs, please consult the run manifests directly in `results/`.
+
+For comprehensive logs, consult the run manifests directly under `results/<provider>/<run_id>/manifest.json`.
 """
-    
+
     with open(report_path, "w") as f:
         f.write(report_content)
-        
+
     logger.success(f"Report compiled successfully at {report_path}")
+
 
 if __name__ == "__main__":
     generate_report()

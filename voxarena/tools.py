@@ -1,19 +1,33 @@
 import os
 import json
+from functools import lru_cache
 from typing import Dict, Any, Optional
 
-# Load data paths relative to this file
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+# Bundled Saffron Leaf demo data. To swap in your own agent, edit these paths
+# (or replace this module's contents entirely with your own tool functions).
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "saffron_leaf")
 MENU_PATH = os.path.join(DATA_DIR, "menu.json")
 HOURS_PATH = os.path.join(DATA_DIR, "hours.json")
+
+
+@lru_cache(maxsize=1)
+def _load_menu() -> Dict[str, Any]:
+    with open(MENU_PATH, "r") as f:
+        return json.load(f)
+
+
+@lru_cache(maxsize=1)
+def _load_hours() -> Dict[str, Any]:
+    with open(HOURS_PATH, "r") as f:
+        return json.load(f)
+
 
 def lookup_menu(category: str) -> str:
     """Retrieve the Saffron Leaf menu items for a specific category (starters, mains, desserts, drinks)."""
     category = category.lower().strip()
     try:
-        with open(MENU_PATH, "r") as f:
-            menu = json.load(f)
-        
+        menu = _load_menu()
+
         if category in menu:
             items = menu[category]
             res = []
@@ -30,9 +44,8 @@ def get_hours(day: str) -> str:
     """Retrieve restaurant operating hours for a specific day of the week (e.g. Monday, Tuesday, etc.)."""
     day = day.lower().strip()
     try:
-        with open(HOURS_PATH, "r") as f:
-            hours = json.load(f)
-        
+        hours = _load_hours()
+
         if day in hours:
             info = hours[day]
             if info["status"] == "closed":
