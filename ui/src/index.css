@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
 :root, :root.light {
   --bg: #ffffff;
   --fg: #000000;
@@ -8,20 +10,40 @@
   --accent-light: #fafafa;
   --success: #16a34a;
   --error: #dc2626;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  
+  --glass-bg: rgba(255, 255, 255, 0.4);
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-border-hover: rgba(99, 102, 241, 0.25);
+  --glass-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --glass-shadow-hover: 0 20px 40px -15px rgba(99, 102, 241, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --orb-opacity: 0.04;
+  --panel-bg: rgba(255, 255, 255, 0.5);
+  --color-primary: #4f46e5;
+  --color-secondary: #0891b2;
 }
 
 :root.dark {
-  --bg: #0a0a0a;
+  --bg: #060911;
   --fg: #ededed;
-  --border: #262626;
-  --muted: #a3a3a3;
-  --muted-light: #171717;
-  --accent: #f5f5f5;
-  --accent-light: #121212;
-  --success: #4ade80;
-  --error: #f87171;
+  --border: #1e293b;
+  --muted: #94a3b8;
+  --muted-light: #0f172a;
+  --accent: #f8fafc;
+  --accent-light: #0f172a;
+  --success: #10b981;
+  --error: #f43f5e;
+  
+  --glass-bg: rgba(15, 23, 42, 0.45);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(99, 102, 241, 0.35);
+  --glass-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --glass-shadow-hover: 0 20px 40px -15px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --orb-opacity: 0.12;
+  --panel-bg: rgba(15, 23, 42, 0.6);
+  --color-primary: #6366f1;
+  --color-secondary: #06b6d4;
 }
 
 * {
@@ -650,4 +672,255 @@ a {
   background-color: var(--error);
   box-shadow: 0 0 8px var(--error);
 }
+
+/* Glassmorphism card elements */
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 16px;
+  box-shadow: var(--glass-shadow);
+  padding: 24px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.glass-card:hover {
+  border-color: var(--glass-border-hover);
+  box-shadow: var(--glass-shadow-hover);
+  transform: translateY(-2px);
+}
+
+/* Mesh Gradient Orbs background layer */
+.mesh-gradient-container {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.glow-orb {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--orb-color) 0%, transparent 70%);
+  filter: blur(80px);
+  pointer-events: none;
+  opacity: var(--orb-opacity);
+  transition: opacity 0.5s ease;
+  width: 40vw;
+  height: 40vw;
+  max-width: 600px;
+  max-height: 600px;
+}
+
+.glow-orb-1 {
+  top: -10%;
+  left: -10%;
+  --orb-color: var(--color-primary);
+}
+
+.glow-orb-2 {
+  bottom: -15%;
+  right: -10%;
+  --orb-color: var(--color-secondary);
+}
+
+.glow-orb-3 {
+  top: 30%;
+  right: 15%;
+  --orb-color: #8b5cf6; /* Purple glow */
+}
+
+/* Live Pipeline Styles */
+.pipeline-visualizer-card {
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.pipeline-nodes-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  padding: 10px 0;
+  width: 100%;
+}
+
+.pipeline-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.pipeline-node-icon-wrapper {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--muted-light);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.pipeline-node.active .pipeline-node-icon-wrapper {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+  box-shadow: 0 0 15px var(--color-primary);
+  transform: scale(1.1);
+}
+
+.pipeline-node.completed .pipeline-node-icon-wrapper {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+  box-shadow: 0 0 10px var(--success);
+}
+
+.pipeline-node.idle .pipeline-node-icon-wrapper {
+  opacity: 0.6;
+}
+
+.pipeline-node-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  max-width: 110px;
+  transition: color 0.3s ease;
+}
+
+.pipeline-node.active .pipeline-node-label {
+  color: var(--fg);
+}
+
+.pipeline-connector {
+  position: absolute;
+  height: 2px;
+  background: var(--border);
+  top: 30px;
+  left: 5%;
+  right: 5%;
+  z-index: 1;
+  border-radius: 2px;
+}
+
+.pipeline-connector-progress {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
+  width: 0%;
+  transition: width 0.5s ease;
+  box-shadow: 0 0 8px var(--color-secondary);
+}
+
+/* Audio Waveform Canvas Styling */
+.audio-player-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.waveform-canvas-container {
+  position: relative;
+  width: 100%;
+  height: 52px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--border);
+}
+
+:root.dark .waveform-canvas-container {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.waveform-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.waveform-latency-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(99, 102, 241, 0.15);
+  border-right: 1.5px dashed var(--color-primary);
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-primary);
+  font-weight: bold;
+  pointer-events: none;
+}
+
+/* Side-by-side Layouts */
+.compare-split-view {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  width: 100%;
+  align-items: start;
+  margin-top: 16px;
+}
+
+@media (max-width: 1024px) {
+  .compare-split-view {
+    grid-template-columns: 1fr;
+  }
+}
+
+.comparison-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+:root.dark .comparison-card {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Scrollable Container Overwrite for Tabs */
+.scrollable-tab-container {
+  height: calc(100vh - 80px);
+  overflow-y: auto;
+  padding: 24px;
+  padding-bottom: 60px;
+  position: relative;
+  z-index: 1;
+}
+
+.launcher-container {
+  height: calc(100vh - 80px);
+  overflow-y: auto;
+  padding: 24px;
+  padding-bottom: 60px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Glow Text Utility */
+.glow-text {
+  text-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+}
+
 
