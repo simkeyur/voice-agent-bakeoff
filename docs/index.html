@@ -777,10 +777,12 @@
       .grid { grid-template-columns: 1fr; gap: 12px; }
       .card { padding: 18px; }
 
-      /* Keep diagrams legible — let the SVG keep its natural minimum width
-         and rely on horizontal scroll on the diagram container. */
-      .diagram { padding: 20px 16px; position: relative; }
-      .diagram > svg { width: auto; min-width: 720px; max-width: none; }
+      /* Keep diagrams legible — force the SVG to a fixed pixel width so the
+         labels stay readable, and let the .diagram container scroll
+         horizontally. Use !important to defeat the base .diagram > svg
+         { width: 100% } rule under all browser quirks. */
+      .diagram { padding: 20px 16px; position: relative; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .diagram > svg { width: 720px !important; min-width: 720px !important; max-width: none !important; height: auto !important; }
       .diagram::after {
         content: 'scroll →';
         position: absolute;
