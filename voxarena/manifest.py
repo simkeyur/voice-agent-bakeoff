@@ -49,6 +49,7 @@ class RunManifest(BaseModel):
     prompt_hash: str
     tool_schema_version: str
     tool_schema_hash: str
+    template_id: Optional[str] = None  # which benchmarking template this run used
     
     # Timestamps
     created_at: float = Field(default_factory=time.time)

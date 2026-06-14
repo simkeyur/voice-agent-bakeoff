@@ -11,12 +11,12 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from voxarena.agent import Agent
-from voxarena.config import ProviderConfig, settings
+from voxarena.config import ProviderConfig, get_setting, settings
 from voxarena.harness import EvaluationHarness
 from voxarena.manifest import RunManifest
 from voxarena.providers import api_key_env
@@ -49,7 +49,8 @@ def create_pending_manifest(provider: str, model: str, transport: str, run_id: s
     Lets HTTP clients see the run immediately, before the background task has
     booted the Pipecat session.
     """
-    agent = Agent()
+    active_template = get_setting("ACTIVE_TEMPLATE") or "restaurant"
+    agent = Agent(template_id=active_template)
     run_dir = os.path.join(settings.RESULTS_DIR, provider, run_id)
     os.makedirs(run_dir, exist_ok=True)
     manifest = RunManifest(
@@ -61,6 +62,7 @@ def create_pending_manifest(provider: str, model: str, transport: str, run_id: s
         prompt_hash=agent.prompt_hash,
         tool_schema_version=agent.tool_schema_version,
         tool_schema_hash=agent.tool_schema_hash,
+        template_id=agent.template_id,
         manifest_path=os.path.join(run_dir, "manifest.json"),
         status="pending",
     )
@@ -94,7 +96,8 @@ async def run_evaluation(
             )
 
         config = ProviderConfig(provider=provider, model=model, transport=transport)
-        agent = Agent()
+        active_template = get_setting("ACTIVE_TEMPLATE") or "restaurant"
+        agent = Agent(template_id=active_template)
         harness = EvaluationHarness(config, agent, api_key, run_id)
         ACTIVE_HARNESSES[run_id] = harness
 

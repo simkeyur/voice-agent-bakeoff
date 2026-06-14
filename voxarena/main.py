@@ -236,10 +236,16 @@ class UtterancesJsonUpdateRequest(BaseModel):
 
 @app.post("/api/utterances/json")
 async def update_utterances_json(req: UtterancesJsonUpdateRequest):
-    """Overwrite SQLite utterances from a parsed JSON array."""
+    """Overwrite SQLite utterances from a parsed JSON array.
+
+    Does NOT touch ACTIVE_TEMPLATE — the user's edited turns are evaluated
+    against whatever agent (system_prompt + tools) the currently-active
+    template defines. Setting ACTIVE_TEMPLATE='custom' previously caused
+    Agent() to silently fall back to the restaurant agent, so custom turns
+    were graded against the wrong system prompt.
+    """
     try:
         save_utterances_to_db(req.utterances)
-        set_setting("ACTIVE_TEMPLATE", "custom")
         return {"status": "saved", "count": len(req.utterances)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save utterances: {e}")

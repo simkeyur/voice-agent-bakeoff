@@ -160,7 +160,8 @@ class EvaluationHarness:
             prompt_hash=self.agent.prompt_hash,
             tool_schema_version=self.agent.tool_schema_version,
             tool_schema_hash=self.agent.tool_schema_hash,
-            manifest_path=manifest_path
+            template_id=self.agent.template_id,
+            manifest_path=manifest_path,
         )
         
         # Instantiate the registered adapter for this provider

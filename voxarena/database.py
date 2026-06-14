@@ -58,6 +58,7 @@ def init_db():
                 prompt_hash TEXT NOT NULL,
                 tool_schema_version TEXT NOT NULL,
                 tool_schema_hash TEXT NOT NULL,
+                template_id TEXT,
                 created_at REAL NOT NULL,
                 completed_at REAL,
                 status TEXT NOT NULL,
@@ -65,6 +66,11 @@ def init_db():
                 metrics TEXT
             );
         """)
+
+        # Migrate older runs tables that predate the template_id column.
+        runs_cols = {row["name"] for row in conn.execute("PRAGMA table_info(runs);").fetchall()}
+        if "template_id" not in runs_cols:
+            conn.execute("ALTER TABLE runs ADD COLUMN template_id TEXT;")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS turns (
@@ -139,9 +145,9 @@ def _bool_or_none(v) -> Optional[int]:
 _RUN_UPSERT_SQL = """
     INSERT INTO runs (
         run_id, provider, model, transport, prompt_version, prompt_hash,
-        tool_schema_version, tool_schema_hash, created_at, completed_at,
-        status, error_message, metrics
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        tool_schema_version, tool_schema_hash, template_id, created_at,
+        completed_at, status, error_message, metrics
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id) DO UPDATE SET
         completed_at = excluded.completed_at,
         status = excluded.status,
@@ -184,8 +190,8 @@ def _run_row(manifest: RunManifest) -> tuple:
     return (
         manifest.run_id, manifest.provider, manifest.model, manifest.transport,
         manifest.prompt_version, manifest.prompt_hash, manifest.tool_schema_version,
-        manifest.tool_schema_hash, manifest.created_at, manifest.completed_at,
-        manifest.status, manifest.error_message, metrics_json,
+        manifest.tool_schema_hash, manifest.template_id, manifest.created_at,
+        manifest.completed_at, manifest.status, manifest.error_message, metrics_json,
     )
 
 
@@ -304,6 +310,7 @@ def load_run_manifest(run_id: str) -> Optional[RunManifest]:
             prompt_hash=run_row["prompt_hash"],
             tool_schema_version=run_row["tool_schema_version"],
             tool_schema_hash=run_row["tool_schema_hash"],
+            template_id=run_row["template_id"] if "template_id" in run_row.keys() else None,
             created_at=run_row["created_at"],
             completed_at=run_row["completed_at"],
             status=run_row["status"],
@@ -341,6 +348,7 @@ def list_run_summaries() -> List[Dict[str, Any]]:
                 "provider": row["provider"],
                 "model": row["model"],
                 "transport": row["transport"],
+                "template_id": row["template_id"] if "template_id" in row.keys() else None,
                 "created_at": row["created_at"],
                 "completed_at": row["completed_at"],
                 "status": row["status"],
