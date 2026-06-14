@@ -20,6 +20,8 @@ VoxArena is a reproducible benchmarking harness for realtime voice agents. Run t
 
 Drop it into your CI pipeline, your dev loop, or the bundled control panel.
 
+📚 **Interactive Documentation Guide:** A visual dashboard guide with an interactive CLI command builder is located in the [docs/](docs/index.html) directory (hostable on GitHub Pages).
+
 ---
 
 ## 🚀 CI & Pipeline Integration
@@ -31,7 +33,7 @@ pip install voxarena
 
 voxarena run \
   --provider gemini \
-  --script ./script/utterances.yaml \
+  --script ./script/utterances.json \
   --min-tool-accuracy 0.9 \
   --max-hallucinations 0 \
   --max-avg-ttfa-ms 1500 \
@@ -105,7 +107,7 @@ From the UI, you can:
 ## Features
 
 - 🎙️ **Provider-agnostic agent** — one Pipecat pipeline drives every provider; swap models without re-implementing your agent
-- 🔁 **Scripted conversations** — multi-turn YAML scripts with pre-recorded WAV inputs and expected tool calls / response content
+- 🔁 **Scripted conversations** — multi-turn JSON or YAML scripts with pre-recorded WAV inputs and expected tool calls / response content
 - 📊 **Automated scoring** — tool-call correctness, response matching, hallucination counts, time-to-first-audio, interruption-stop latency
 - 🆚 **Side-by-side comparisons** — run multiple providers in parallel against the same script
 - 🗄️ **Persistent run history** — JSON manifests on disk, indexed in SQLite
@@ -150,7 +152,7 @@ The demo ships with the "Saffron Leaf" restaurant agent so you can run end-to-en
 
 ## Scripted Conversations
 
-Conversations live in [`script/utterances.yaml`](script/utterances.yaml). Each turn pairs an utterance id with an `expect` block describing the correct tool call and/or response content:
+Conversations live in either JSON or YAML script files (e.g., [`script/utterances.json`](script/utterances.json) or [`script/utterances.yaml`](script/utterances.yaml)). Each turn pairs an utterance ID with an `expect` block describing the correct tool call and/or response content:
 
 ```yaml
 - id: u04
