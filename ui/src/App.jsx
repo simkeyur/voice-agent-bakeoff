@@ -406,6 +406,9 @@ function App() {
   const [utterancesSaveMsg, setUtterancesSaveMsg] = useState('');
   const [resetMsg, setResetMsg] = useState('');
   const [templates, setTemplates] = useState([]);
+  const [verifyingProvider, setVerifyingProvider] = useState(null);
+  const [geminiVerifiedStatus, setGeminiVerifiedStatus] = useState(null);
+  const [openaiVerifiedStatus, setOpenaiVerifiedStatus] = useState(null);
   
   // Detailed Run Inspection
   const [selectedRunId, setSelectedRunId] = useState(null);
@@ -880,6 +883,37 @@ function App() {
       })
       .catch((err) => {
         setUtterancesSaveMsg(`Error loading template: ${err.message}`);
+      });
+  };
+
+  const handleVerifyKey = (provider) => {
+    const isGemini = provider === 'gemini';
+    const key = isGemini ? settingsGoogleApiKey : settingsOpenaiApiKey;
+    const setStatus = isGemini ? setGeminiVerifiedStatus : setOpenaiVerifiedStatus;
+    
+    setVerifyingProvider(provider);
+    setStatus(null);
+
+    fetch(`${backendUrl}/api/settings/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: provider,
+        api_key: key
+      })
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (res.ok) {
+          setStatus({ success: true, message: data.message });
+        } else {
+          setStatus({ success: false, message: data.detail || 'Failed to verify key.' });
+        }
+        setVerifyingProvider(null);
+      })
+      .catch((err) => {
+        setStatus({ success: false, message: `Connection error: ${err.message}` });
+        setVerifyingProvider(null);
       });
   };
 
@@ -1748,6 +1782,26 @@ function App() {
 
         {activeTab === 'settings' && (
           <div className="scrollable-tab-container">
+            {/* Local Storage Security Banner */}
+            <div className="setup-banner" style={{ 
+              marginBottom: 16, 
+              background: 'rgba(99, 102, 241, 0.05)', 
+              borderColor: 'rgba(99, 102, 241, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              fontSize: 13,
+              borderRadius: 12,
+              padding: '12px 16px',
+              borderWidth: 1,
+              borderStyle: 'solid'
+            }}>
+              <span style={{ fontSize: 18 }}>🔒</span>
+              <div style={{ color: 'var(--fg)', textAlign: 'left' }}>
+                <strong>Local-Only Storage:</strong> Your API keys and configurations are saved strictly inside your local SQLite database (`runs.db`). They never leave your machine and are only transmitted directly to the official Google Gemini or OpenAI API endpoints during benchmarks.
+              </div>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginBottom: 24 }}>
               {/* Google Gemini Settings */}
               <div className="card" style={{ margin: 0 }}>
@@ -1757,13 +1811,43 @@ function App() {
                 <div className="card-body">
                   <div className="form-group" style={{ marginBottom: 12 }}>
                     <label className="form-label">Google Gemini API Key</label>
-                    <input
-                      type="password"
-                      className="text-input"
-                      value={settingsGoogleApiKey}
-                      onChange={(e) => setSettingsGoogleApiKey(e.target.value)}
-                      placeholder={settingsGoogleApiKey ? "••••••••" : "Enter Google API Key"}
-                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="password"
+                        className="text-input"
+                        value={settingsGoogleApiKey}
+                        onChange={(e) => {
+                          setSettingsGoogleApiKey(e.target.value);
+                          setGeminiVerifiedStatus(null);
+                        }}
+                        placeholder={settingsGoogleApiKey ? "••••••••" : "Enter Google API Key"}
+                        style={{ flex: 1 }}
+                      />
+                      <button 
+                        type="button" 
+                        className="btn" 
+                        onClick={() => handleVerifyKey('gemini')}
+                        disabled={verifyingProvider === 'gemini'}
+                        style={{ fontSize: 12, padding: '4px 12px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}
+                      >
+                        {verifyingProvider === 'gemini' ? 'Verifying...' : 'Verify'}
+                      </button>
+                    </div>
+                    {geminiVerifiedStatus && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: geminiVerifiedStatus.success ? 'var(--success)' : 'var(--error)', textAlign: 'left' }}>
+                        {geminiVerifiedStatus.success ? (
+                          <>
+                            <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
+                            <span>{geminiVerifiedStatus.message}</span>
+                          </>
+                        ) : (
+                          <>
+                            <XCircle size={14} style={{ color: 'var(--error)', flexShrink: 0 }} />
+                            <span>{geminiVerifiedStatus.message}</span>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="form-group" style={{ marginBottom: 12 }}>
@@ -1811,13 +1895,43 @@ function App() {
                 <div className="card-body">
                   <div className="form-group" style={{ marginBottom: 12 }}>
                     <label className="form-label">OpenAI API Key</label>
-                    <input
-                      type="password"
-                      className="text-input"
-                      value={settingsOpenaiApiKey}
-                      onChange={(e) => setSettingsOpenaiApiKey(e.target.value)}
-                      placeholder={settingsOpenaiApiKey ? "••••••••" : "Enter OpenAI API Key"}
-                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="password"
+                        className="text-input"
+                        value={settingsOpenaiApiKey}
+                        onChange={(e) => {
+                          setSettingsOpenaiApiKey(e.target.value);
+                          setOpenaiVerifiedStatus(null);
+                        }}
+                        placeholder={settingsOpenaiApiKey ? "••••••••" : "Enter OpenAI API Key"}
+                        style={{ flex: 1 }}
+                      />
+                      <button 
+                        type="button" 
+                        className="btn" 
+                        onClick={() => handleVerifyKey('openai')}
+                        disabled={verifyingProvider === 'openai'}
+                        style={{ fontSize: 12, padding: '4px 12px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}
+                      >
+                        {verifyingProvider === 'openai' ? 'Verifying...' : 'Verify'}
+                      </button>
+                    </div>
+                    {openaiVerifiedStatus && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: openaiVerifiedStatus.success ? 'var(--success)' : 'var(--error)', textAlign: 'left' }}>
+                        {openaiVerifiedStatus.success ? (
+                          <>
+                            <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
+                            <span>{openaiVerifiedStatus.message}</span>
+                          </>
+                        ) : (
+                          <>
+                            <XCircle size={14} style={{ color: 'var(--error)', flexShrink: 0 }} />
+                            <span>{openaiVerifiedStatus.message}</span>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="form-group" style={{ marginBottom: 12 }}>

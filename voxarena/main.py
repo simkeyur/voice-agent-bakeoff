@@ -164,6 +164,62 @@ async def update_settings(req: SettingsUpdateRequest):
     }
 
 
+class VerifyKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+
+
+@app.post("/api/settings/verify")
+async def verify_api_key(req: VerifyKeyRequest):
+    """Statelessly check if the provided (or stored) API key connects successfully."""
+    provider = req.provider.lower()
+    if provider not in ["gemini", "openai"]:
+        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
+
+    api_key = req.api_key
+    if api_key == "••••••••" or not api_key:
+        env_var = "GOOGLE_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
+        api_key = get_setting(env_var)
+        if not api_key:
+            raise HTTPException(status_code=400, detail=f"No key saved for '{provider}' to verify.")
+
+    import httpx
+    try:
+        if provider == "gemini":
+            # Call models list API on Gemini (returns 200 on valid key, 400/403 on invalid)
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+            async with httpx.AsyncClient() as client:
+                res = await client.get(url, timeout=5.0)
+            if res.status_code == 200:
+                return {"status": "success", "message": "Gemini API key verified successfully."}
+            else:
+                detail = "Invalid Gemini API Key."
+                try:
+                    err_msg = res.json().get("error", {}).get("message", "Invalid API Key")
+                    detail = f"Gemini API error: {err_msg}"
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail=detail)
+        else:
+            # Call models API on OpenAI (returns 200 on valid key, 401 on invalid)
+            url = "https://api.openai.com/v1/models"
+            headers = {"Authorization": f"Bearer {api_key}"}
+            async with httpx.AsyncClient() as client:
+                res = await client.get(url, headers=headers, timeout=5.0)
+            if res.status_code == 200:
+                return {"status": "success", "message": "OpenAI API key verified successfully."}
+            else:
+                detail = "Invalid OpenAI API Key."
+                try:
+                    err_msg = res.json().get("error", {}).get("message", "Invalid API Key")
+                    detail = f"OpenAI API error: {err_msg}"
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail=detail)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Network connection failure: {e}")
+
+
 @app.get("/api/utterances/json")
 async def get_utterances_json():
     """Retrieve scripted conversation utterances as a parsed JSON array from SQLite."""
