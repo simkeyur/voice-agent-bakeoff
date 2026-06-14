@@ -659,22 +659,23 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          gemini_model: geminiModel,
-          openai_model: openaiModel,
+          models: { gemini: geminiModel, openai: openaiModel },
           transport: selectedTransport,
           num_turns: numTurns
         })
       })
         .then((res) => res.json())
         .then((data) => {
-          if (data.gemini_run_id && data.openai_run_id) {
-            setCompareRunIds({ gemini: data.gemini_run_id, openai: data.openai_run_id });
-            addLog(`Comparison runs started. Gemini: ${data.gemini_run_id}, OpenAI: ${data.openai_run_id}`);
-            pollCompareStatus(data.gemini_run_id, data.openai_run_id);
+          const gid = data.run_ids?.gemini;
+          const oid = data.run_ids?.openai;
+          if (gid && oid) {
+            setCompareRunIds({ gemini: gid, openai: oid });
+            addLog(`Comparison runs started. Gemini: ${gid}, OpenAI: ${oid}`);
+            pollCompareStatus(gid, oid);
             
             // Navigate to Runs compare page
             setIsNewRunModalOpen(false);
-            window.location.hash = `#/runs/compare/${data.gemini_run_id}/${data.openai_run_id}`;
+            window.location.hash = `#/runs/compare/${gid}/${oid}`;
           } else {
             addLog(`Failed to start comparison run: ${data.detail || 'unknown error'}`);
           }

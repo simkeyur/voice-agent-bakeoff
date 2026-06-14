@@ -246,7 +246,7 @@ class EvaluationHarness:
         # Start Pipecat pipeline task in background
         logger.info(f"[Harness] Starting pipeline runner task for {self.config.provider}...")
         self.manifest.status = "running"
-        await self.manifest.save_async()
+        await self.manifest.save_progress_async()
         
         runner_task = asyncio.create_task(runner.run(task))
         
@@ -271,59 +271,59 @@ class EvaluationHarness:
         collector.turn_completed_event.clear()
         await asyncio.sleep(0.5)
         
-        try:
-            # 3. Sequence Turns
+        # Session-wide cap: each turn's own 15s wait + 2s reflection ~= 20s, plus
+        # generous headroom for slow provider startup. Prevents a wedged Pipecat
+        # WebSocket from blocking the run forever.
+        session_timeout_sec = max(60.0, len(utterances) * 30.0)
+
+        async def _drive_turns():
             for i, utt in enumerate(utterances):
                 if self.stop_requested:
                     logger.info("[Harness] Stop requested before turn injection, breaking.")
                     break
-                    
+
                 utt_id = utt["id"]
                 text = utt["text"]
                 logger.info(f"\n--- [Harness] Turn {i+1}/{len(utterances)}: {utt_id} - '{text}' ---")
-                
-                # Signal turn start to metrics and capture
+
                 collector.on_input_injected(utt_id, text, utt.get("expect"))
                 capture.start_turn(utt_id)
 
-                # Persist so the UI can show "sent to agent" for this turn while it's in flight
-                await self.manifest.save_async()
+                await self.manifest.save_progress_async(collector.current_turn)
 
                 audio_path = os.path.join(settings.AUDIO_DIR, f"{utt_id}.wav")
-
-                # Inject audio file
                 injection_task = asyncio.create_task(injector.inject_wav(audio_path))
-                
-                # Handle Interruption logic if defined (e.g. if next turn interrupts current speaking)
-                # For this baseline, we wait for turn to complete normally:
+
                 try:
                     await asyncio.wait_for(collector.turn_completed_event.wait(), timeout=15.0)
                 except asyncio.TimeoutError:
                     logger.warning(f"[Harness] Timeout waiting for response completion on {utt_id}.")
-                    collector.turn_completed_event.set() # force clear
-                
-                # Stop injection if it was still running (e.g., timed out)
+                    collector.turn_completed_event.set()
+
                 injector.stop_injection()
                 await injection_task
-                
+
                 if self.stop_requested:
                     logger.info("[Harness] Stop requested during turn wait, breaking.")
                     break
-                    
-                # Save captured audio for the turn
+
                 saved_audio = capture.save_turn_audio()
                 if collector.current_turn:
                     collector.current_turn.audio_output_path = saved_audio
 
-                # Score the turn against its expected tool call / response content
                 collector.evaluate_turn()
-
-                # Persist the completed turn (transcript, TTFA, tool eval) for the UI
-                await self.manifest.save_async()
-
-                # Wait between turns to simulate user reflection
+                await self.manifest.save_progress_async(collector.current_turn)
                 await asyncio.sleep(2.0)
-                
+
+        timed_out = False
+        try:
+            try:
+                await asyncio.wait_for(_drive_turns(), timeout=session_timeout_sec)
+            except asyncio.TimeoutError:
+                logger.error(f"[Harness] Session timeout exceeded ({session_timeout_sec:.0f}s). Forcing shutdown.")
+                timed_out = True
+                self.stop_requested = True
+
             # 4. Graceful Shutdown
             logger.info("[Harness] All turns executed or stopped. Stopping pipeline task...")
             if not runner_task.done():
@@ -333,16 +333,18 @@ class EvaluationHarness:
                 except asyncio.TimeoutError:
                     logger.warning("[Harness] Runner task did not stop in time, cancelling.")
                     runner_task.cancel()
-            
+
             # 5. Compile Final Run Results
             self.manifest.completed_at = time.time()
-            if self.stop_requested:
+            if timed_out:
+                self.manifest.status = "failed"
+                self.manifest.error_message = f"Session timed out after {session_timeout_sec:.0f}s."
+            elif self.stop_requested:
                 self.manifest.status = "failed"
                 self.manifest.error_message = "Run stopped by user."
             else:
                 self.manifest.status = "completed"
-            
-            # Calculate aggregate metrics
+
             self.compile_aggregates()
             await self.manifest.save_async()
             logger.info(f"[Harness] Manifest saved to {self.manifest.manifest_path}")
@@ -381,5 +383,4 @@ class EvaluationHarness:
             average_interruption_stop_latency_ms=avg_interruption,
             tool_call_accuracy_rate=tool_accuracy,
             hallucination_count=hallucination_count,
-            total_cost_usd=0.0           # estimated cost calculation can go here
         )

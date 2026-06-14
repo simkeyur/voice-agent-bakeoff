@@ -123,10 +123,8 @@ def get_setting(key: str) -> Optional[str]:
 def set_setting(key: str, value: str) -> None:
     # 1. Update SQLite settings table
     try:
-        from voxarena.database import get_db_connection
-        # Ensure database is initialized before we write to it
-        from voxarena.database import init_db
-        init_db()
+        from voxarena.database import get_db_connection, _ensure_initialized
+        _ensure_initialized()
         with get_db_connection() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);",

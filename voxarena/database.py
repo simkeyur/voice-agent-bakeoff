@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sqlite3
 import json
@@ -14,23 +15,26 @@ _INITIALIZED = False
 def get_db_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # WAL + relaxed sync give us concurrent reads/writes without "database is
+    # locked" errors under parallel compare runs. Foreign keys must be enabled
+    # per-connection in SQLite.
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 
 def _ensure_initialized() -> None:
     """Lazy init for callers that don't go through the FastAPI lifespan (e.g. the CLI)."""
-    global _INITIALIZED
     if not _INITIALIZED:
         init_db()
-        _INITIALIZED = True
+
 
 def init_db():
     """Initialize the database and create tables if they do not exist."""
     global _INITIALIZED
     logger.info(f"Initializing SQLite database at {DB_PATH}")
     with get_db_connection() as conn:
-        conn.execute("PRAGMA foreign_keys = ON;")
-
         # One-shot migration: legacy turns table had an AUTOINCREMENT `id` column
         # and no composite primary key. Drop both tables so the new schema below
         # is created cleanly and the startup backfill repopulates from JSON manifests.
@@ -44,7 +48,6 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
-        # Create runs table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY,
@@ -63,7 +66,6 @@ def init_db():
             );
         """)
 
-        # Create turns table — (run_id, utterance_id) is the natural identity used by UPSERT
         conn.execute("""
             CREATE TABLE IF NOT EXISTS turns (
                 run_id TEXT NOT NULL,
@@ -90,14 +92,12 @@ def init_db():
             );
         """)
 
-        # Migrate older databases that predate these columns
         existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(turns);").fetchall()}
         if "response_match" not in existing_cols:
             conn.execute("ALTER TABLE turns ADD COLUMN response_match INTEGER;")
         if "evaluation_passed" not in existing_cols:
             conn.execute("ALTER TABLE turns ADD COLUMN evaluation_passed INTEGER;")
 
-        # Create settings table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -109,6 +109,7 @@ def init_db():
     _INITIALIZED = True
     logger.success("SQLite database initialized successfully.")
 
+
 def _bool_or_none(v) -> Optional[int]:
     if v is True:
         return 1
@@ -117,88 +118,103 @@ def _bool_or_none(v) -> Optional[int]:
     return None
 
 
-def save_run_manifest(manifest: RunManifest):
-    """Save or update a RunManifest in SQLite using per-turn UPSERT.
+_RUN_UPSERT_SQL = """
+    INSERT INTO runs (
+        run_id, provider, model, transport, prompt_version, prompt_hash,
+        tool_schema_version, tool_schema_hash, created_at, completed_at,
+        status, error_message, metrics
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(run_id) DO UPDATE SET
+        completed_at = excluded.completed_at,
+        status = excluded.status,
+        error_message = excluded.error_message,
+        metrics = excluded.metrics;
+"""
 
-    Avoids the previous delete-all-then-reinsert pattern which produced O(N^2)
-    writes when the harness called manifest.save() after every turn.
-    """
+_TURN_UPSERT_SQL = """
+    INSERT INTO turns (
+        run_id, utterance_id, text_input, audio_input_path, transcript_output,
+        audio_output_path, input_sent_at, first_audio_received_at,
+        audio_completed_received_at, interruption_sent_at, interruption_stopped_at,
+        time_to_first_audio_ms, interruption_stop_latency_ms, tool_call_correct,
+        tool_call_details, hallucination_count, evaluation_notes,
+        response_match, evaluation_passed
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(run_id, utterance_id) DO UPDATE SET
+        text_input = excluded.text_input,
+        audio_input_path = excluded.audio_input_path,
+        transcript_output = excluded.transcript_output,
+        audio_output_path = excluded.audio_output_path,
+        input_sent_at = excluded.input_sent_at,
+        first_audio_received_at = excluded.first_audio_received_at,
+        audio_completed_received_at = excluded.audio_completed_received_at,
+        interruption_sent_at = excluded.interruption_sent_at,
+        interruption_stopped_at = excluded.interruption_stopped_at,
+        time_to_first_audio_ms = excluded.time_to_first_audio_ms,
+        interruption_stop_latency_ms = excluded.interruption_stop_latency_ms,
+        tool_call_correct = excluded.tool_call_correct,
+        tool_call_details = excluded.tool_call_details,
+        hallucination_count = excluded.hallucination_count,
+        evaluation_notes = excluded.evaluation_notes,
+        response_match = excluded.response_match,
+        evaluation_passed = excluded.evaluation_passed;
+"""
+
+
+def _run_row(manifest: RunManifest) -> tuple:
+    metrics_json = json.dumps(manifest.metrics.model_dump()) if manifest.metrics else None
+    return (
+        manifest.run_id, manifest.provider, manifest.model, manifest.transport,
+        manifest.prompt_version, manifest.prompt_hash, manifest.tool_schema_version,
+        manifest.tool_schema_hash, manifest.created_at, manifest.completed_at,
+        manifest.status, manifest.error_message, metrics_json,
+    )
+
+
+def _turn_row(run_id: str, turn: TurnMetric) -> tuple:
+    return (
+        run_id, turn.utterance_id, turn.text_input, turn.audio_input_path,
+        turn.transcript_output, turn.audio_output_path, turn.input_sent_at,
+        turn.first_audio_received_at, turn.audio_completed_received_at,
+        turn.interruption_sent_at, turn.interruption_stopped_at,
+        turn.time_to_first_audio_ms, turn.interruption_stop_latency_ms,
+        _bool_or_none(turn.tool_call_correct),
+        json.dumps(turn.tool_call_details) if turn.tool_call_details else None,
+        turn.hallucination_count, turn.evaluation_notes,
+        _bool_or_none(turn.response_match), _bool_or_none(turn.evaluation_passed),
+    )
+
+
+def save_run_manifest(manifest: RunManifest):
+    """Upsert the run row plus every turn. Used for full saves (startup backfill,
+    end-of-run finalization). For mid-run updates prefer save_run_progress."""
     _ensure_initialized()
     with get_db_connection() as conn:
-        conn.execute("PRAGMA foreign_keys = ON;")
-
-        # Insert or update run
-        metrics_json = json.dumps(manifest.metrics.model_dump()) if manifest.metrics else None
-        conn.execute("""
-            INSERT INTO runs (
-                run_id, provider, model, transport, prompt_version, prompt_hash,
-                tool_schema_version, tool_schema_hash, created_at, completed_at,
-                status, error_message, metrics
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(run_id) DO UPDATE SET
-                completed_at = excluded.completed_at,
-                status = excluded.status,
-                error_message = excluded.error_message,
-                metrics = excluded.metrics;
-        """, (
-            manifest.run_id, manifest.provider, manifest.model, manifest.transport,
-            manifest.prompt_version, manifest.prompt_hash, manifest.tool_schema_version,
-            manifest.tool_schema_hash, manifest.created_at, manifest.completed_at,
-            manifest.status, manifest.error_message, metrics_json
-        ))
-
-        # UPSERT each turn keyed by (run_id, utterance_id)
-        turn_rows = [
-            (
-                manifest.run_id, turn.utterance_id, turn.text_input, turn.audio_input_path,
-                turn.transcript_output, turn.audio_output_path, turn.input_sent_at,
-                turn.first_audio_received_at, turn.audio_completed_received_at,
-                turn.interruption_sent_at, turn.interruption_stopped_at,
-                turn.time_to_first_audio_ms, turn.interruption_stop_latency_ms,
-                _bool_or_none(turn.tool_call_correct),
-                json.dumps(turn.tool_call_details) if turn.tool_call_details else None,
-                turn.hallucination_count, turn.evaluation_notes,
-                _bool_or_none(turn.response_match), _bool_or_none(turn.evaluation_passed),
-            )
-            for turn in manifest.turns
-        ]
-
-        conn.executemany("""
-            INSERT INTO turns (
-                run_id, utterance_id, text_input, audio_input_path, transcript_output,
-                audio_output_path, input_sent_at, first_audio_received_at,
-                audio_completed_received_at, interruption_sent_at, interruption_stopped_at,
-                time_to_first_audio_ms, interruption_stop_latency_ms, tool_call_correct,
-                tool_call_details, hallucination_count, evaluation_notes,
-                response_match, evaluation_passed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(run_id, utterance_id) DO UPDATE SET
-                text_input = excluded.text_input,
-                audio_input_path = excluded.audio_input_path,
-                transcript_output = excluded.transcript_output,
-                audio_output_path = excluded.audio_output_path,
-                input_sent_at = excluded.input_sent_at,
-                first_audio_received_at = excluded.first_audio_received_at,
-                audio_completed_received_at = excluded.audio_completed_received_at,
-                interruption_sent_at = excluded.interruption_sent_at,
-                interruption_stopped_at = excluded.interruption_stopped_at,
-                time_to_first_audio_ms = excluded.time_to_first_audio_ms,
-                interruption_stop_latency_ms = excluded.interruption_stop_latency_ms,
-                tool_call_correct = excluded.tool_call_correct,
-                tool_call_details = excluded.tool_call_details,
-                hallucination_count = excluded.hallucination_count,
-                evaluation_notes = excluded.evaluation_notes,
-                response_match = excluded.response_match,
-                evaluation_passed = excluded.evaluation_passed;
-        """, turn_rows)
+        conn.execute(_RUN_UPSERT_SQL, _run_row(manifest))
+        conn.executemany(_TURN_UPSERT_SQL, [_turn_row(manifest.run_id, t) for t in manifest.turns])
         conn.commit()
     logger.debug(f"Saved run manifest {manifest.run_id} to SQLite database.")
 
 
+def save_run_progress(manifest: RunManifest, turn: Optional[TurnMetric] = None):
+    """Upsert the run row plus (optionally) a single turn. Avoids the O(N^2)
+    write amplification of re-upserting every turn after each step of a run."""
+    _ensure_initialized()
+    with get_db_connection() as conn:
+        conn.execute(_RUN_UPSERT_SQL, _run_row(manifest))
+        if turn is not None:
+            conn.execute(_TURN_UPSERT_SQL, _turn_row(manifest.run_id, turn))
+        conn.commit()
+
+
 async def save_run_manifest_async(manifest: RunManifest) -> None:
     """Async wrapper for save_run_manifest — call from async code to keep the event loop responsive."""
-    import asyncio
     await asyncio.to_thread(save_run_manifest, manifest)
+
+
+async def save_run_progress_async(manifest: RunManifest, turn: Optional[TurnMetric] = None) -> None:
+    await asyncio.to_thread(save_run_progress, manifest, turn)
+
 
 def load_run_manifest(run_id: str) -> Optional[RunManifest]:
     """Load a RunManifest by ID from SQLite."""
@@ -206,18 +222,18 @@ def load_run_manifest(run_id: str) -> Optional[RunManifest]:
         run_row = conn.execute("SELECT * FROM runs WHERE run_id = ?;", (run_id,)).fetchone()
         if not run_row:
             return None
-            
+
         turn_rows = conn.execute(
             "SELECT * FROM turns WHERE run_id = ? ORDER BY input_sent_at ASC;",
             (run_id,),
         ).fetchall()
-        
+
         turns = []
         for row in turn_rows:
             tool_correct = None
             if row["tool_call_correct"] is not None:
                 tool_correct = bool(row["tool_call_correct"])
-                
+
             tool_details = None
             if row["tool_call_details"]:
                 try:
@@ -251,16 +267,16 @@ def load_run_manifest(run_id: str) -> Optional[RunManifest]:
                 hallucination_count=row["hallucination_count"],
                 evaluation_notes=row["evaluation_notes"],
                 response_match=response_match,
-                evaluation_passed=evaluation_passed
+                evaluation_passed=evaluation_passed,
             ))
-            
+
         metrics = AggregateMetrics()
         if run_row["metrics"]:
             try:
                 metrics = AggregateMetrics(**json.loads(run_row["metrics"]))
             except Exception:
                 pass
-                
+
         manifest = RunManifest(
             run_id=run_row["run_id"],
             provider=run_row["provider"],
@@ -275,15 +291,24 @@ def load_run_manifest(run_id: str) -> Optional[RunManifest]:
             status=run_row["status"],
             error_message=run_row["error_message"],
             turns=turns,
-            metrics=metrics
+            metrics=metrics,
         )
         manifest.manifest_path = os.path.join(settings.RESULTS_DIR, run_row["provider"], run_id, "manifest.json")
         return manifest
 
+
 def list_run_summaries() -> List[Dict[str, Any]]:
-    """List summary details of all runs in SQLite."""
+    """List summary details of all runs in SQLite (single query, no N+1)."""
     with get_db_connection() as conn:
-        rows = conn.execute("SELECT * FROM runs ORDER BY created_at DESC;").fetchall()
+        rows = conn.execute("""
+            SELECT r.*, COALESCE(t.turn_count, 0) AS turn_count
+            FROM runs r
+            LEFT JOIN (
+                SELECT run_id, COUNT(*) AS turn_count
+                FROM turns GROUP BY run_id
+            ) t ON r.run_id = t.run_id
+            ORDER BY r.created_at DESC;
+        """).fetchall()
         runs = []
         for row in rows:
             metrics_dict = None
@@ -292,10 +317,7 @@ def list_run_summaries() -> List[Dict[str, Any]]:
                     metrics_dict = json.loads(row["metrics"])
                 except Exception:
                     pass
-            
-            # Count turns
-            turn_count = conn.execute("SELECT COUNT(*) FROM turns WHERE run_id = ?;", (row["run_id"],)).fetchone()[0]
-            
+
             runs.append({
                 "run_id": row["run_id"],
                 "provider": row["provider"],
@@ -304,10 +326,11 @@ def list_run_summaries() -> List[Dict[str, Any]]:
                 "created_at": row["created_at"],
                 "completed_at": row["completed_at"],
                 "status": row["status"],
-                "total_turns": turn_count,
-                "aggregate_metrics": metrics_dict
+                "total_turns": row["turn_count"],
+                "aggregate_metrics": metrics_dict,
             })
         return runs
+
 
 def list_run_ids() -> List[str]:
     """Return all known run_ids — cheap helper for incremental backfill."""
@@ -318,7 +341,6 @@ def list_run_ids() -> List[str]:
 def delete_run_from_db(run_id: str):
     """Delete a run and cascade delete turns from SQLite."""
     with get_db_connection() as conn:
-        conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute("DELETE FROM runs WHERE run_id = ?;", (run_id,))
         conn.commit()
     logger.info(f"Deleted run {run_id} from SQLite database.")
@@ -328,9 +350,7 @@ def reset_db():
     """Wipe all runs and turns from SQLite, starting from a clean slate."""
     _ensure_initialized()
     with get_db_connection() as conn:
-        conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute("DELETE FROM turns;")
         conn.execute("DELETE FROM runs;")
         conn.commit()
     logger.warning("Reset SQLite database: deleted all runs and turns.")
-

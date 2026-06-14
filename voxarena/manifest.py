@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 import time
@@ -87,7 +88,6 @@ class RunManifest(BaseModel):
 
     async def save_async(self):
         """Async save — JSON dump inline (cheap), SQLite write off the event loop."""
-        import asyncio
         if not self.manifest_path:
             raise ValueError("manifest_path must be set to save the manifest.")
 
@@ -101,6 +101,24 @@ class RunManifest(BaseModel):
         except Exception as e:
             from loguru import logger
             logger.error(f"Failed to save manifest to SQLite database: {e}")
+
+    async def save_progress_async(self, turn: Optional["TurnMetric"] = None):
+        """Async incremental save: writes the JSON manifest plus the run row and
+        (optionally) a single turn row. Avoids re-upserting every turn after
+        each step of an in-flight run."""
+        if not self.manifest_path:
+            raise ValueError("manifest_path must be set to save the manifest.")
+
+        os.makedirs(os.path.dirname(self.manifest_path), exist_ok=True)
+        with open(self.manifest_path, "w") as f:
+            f.write(self.model_dump_json(indent=2))
+
+        try:
+            from voxarena.database import save_run_progress
+            await asyncio.to_thread(save_run_progress, self, turn)
+        except Exception as e:
+            from loguru import logger
+            logger.error(f"Failed to save manifest progress to SQLite database: {e}")
 
     @classmethod
     def load(cls, path: str) -> "RunManifest":
