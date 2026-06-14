@@ -255,6 +255,52 @@
       body.nav-open .nav-backdrop { display: block; }
     }
 
+    @media (max-width: 640px) {
+      main { padding: 20px 16px 64px; }
+      section { margin-bottom: 56px; }
+
+      h1 { font-size: 30px; letter-spacing: -0.6px; }
+      h2 { font-size: 21px; gap: 8px; }
+      h2 .anchor-icon { width: 18px; height: 18px; }
+      h3 { font-size: 15.5px; }
+      .lead { font-size: 16px; margin-bottom: 28px; }
+      p, li { font-size: 14.5px; }
+
+      /* Keep diagrams legible — let the SVG keep its natural minimum width
+         and rely on horizontal scroll on the diagram container. */
+      .diagram { padding: 20px 16px; }
+      .diagram > svg { width: auto; min-width: 720px; max-width: none; }
+
+      /* Mock report header: let the title and status pill wrap rather than
+         squish into one overflowing line. */
+      .mock-report-head { flex-wrap: wrap; gap: 8px; }
+      .mock-report-head .run-title { font-size: 13px; word-break: break-word; }
+
+      /* Code blocks: tighter on phones */
+      pre code { font-size: 12px; padding: 14px 14px; }
+      pre .pre-header { padding: 7px 12px; font-size: 11px; }
+
+      .grid { gap: 12px; }
+      .card { padding: 18px; }
+
+      .builder { padding: 18px; }
+    }
+
+    /* Small print: scroll hint on the diagram on touch devices */
+    @media (max-width: 640px) {
+      .diagram { position: relative; }
+      .diagram::after {
+        content: 'scroll →';
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: var(--fg-faint);
+        pointer-events: none;
+      }
+    }
+
     section {
       margin-bottom: 80px;
       scroll-margin-top: 24px;
