@@ -65,13 +65,21 @@ async def _run_single(
         )
 
     resolved_model = _resolve_model(provider, model, settings)
-    script_path = script or os.path.join(settings.SCRIPT_DIR, "utterances.yaml")
+    script_path = script
+    if not script_path:
+        json_default = os.path.join(settings.SCRIPT_DIR, "utterances.json")
+        yaml_default = os.path.join(settings.SCRIPT_DIR, "utterances.yaml")
+        if os.path.exists(json_default):
+            script_path = json_default
+        else:
+            script_path = yaml_default
+
     if not os.path.exists(script_path):
         raise SystemExit(f"error: script file not found: {script_path}")
 
     run_id = runner.new_run_id(suffix=run_id_suffix)
     return await runner.run_evaluation(
-        provider, resolved_model, transport, run_id, num_turns, script_path
+        provider, resolved_model, transport, run_id, num_turns, script=script_path
     )
 
 
@@ -268,7 +276,7 @@ def _add_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--transport", default="direct-injection",
                         choices=["direct-injection", "webrtc-local"])
     parser.add_argument("--script", default=None,
-                        help="Path to utterances YAML (default: <workdir>/script/utterances.yaml).")
+                        help="Path to JSON or YAML utterances script (default: <workdir>/script/utterances.json or utterances.yaml).")
     parser.add_argument("--num-turns", type=int, default=None,
                         help="Limit to the first N utterances from the script.")
     parser.add_argument("--workdir", default=None,

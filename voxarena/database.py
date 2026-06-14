@@ -105,6 +105,46 @@ def init_db():
             );
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS utterances (
+                id TEXT PRIMARY KEY,
+                text TEXT NOT NULL,
+                expect TEXT
+            );
+        """)
+
+        # Bootstrap default utterances if table is empty
+        count = conn.execute("SELECT COUNT(*) FROM utterances;").fetchone()[0]
+        if count == 0:
+            import yaml
+            default_yaml = None
+            script_yaml = os.path.join(settings.SCRIPT_DIR, "utterances.yaml")
+            if os.path.exists(script_yaml):
+                default_yaml = script_yaml
+            else:
+                try:
+                    import importlib.resources
+                    pkg_yaml = importlib.resources.files("voxarena").joinpath("default_script").joinpath("utterances.yaml")
+                    if pkg_yaml.exists():
+                        default_yaml = str(pkg_yaml)
+                except Exception:
+                    pass
+
+            if default_yaml:
+                try:
+                    with open(default_yaml, "r") as f:
+                        parsed = yaml.safe_load(f)
+                    if isinstance(parsed, list):
+                        for u in parsed:
+                            expect_json = json.dumps(u.get("expect") or {})
+                            conn.execute(
+                                "INSERT OR REPLACE INTO utterances (id, text, expect) VALUES (?, ?, ?);",
+                                (u["id"], u["text"], expect_json)
+                            )
+                        logger.info(f"Bootstrapped {len(parsed)} utterances from {default_yaml} into SQLite.")
+                except Exception as e:
+                    logger.error(f"Failed to bootstrap database utterances: {e}")
+
         conn.commit()
     _INITIALIZED = True
     logger.success("SQLite database initialized successfully.")
@@ -354,3 +394,38 @@ def reset_db():
         conn.execute("DELETE FROM runs;")
         conn.commit()
     logger.warning("Reset SQLite database: deleted all runs and turns.")
+
+
+def load_utterances_from_db() -> List[Dict[str, Any]]:
+    """Retrieve all conversation utterances from SQLite."""
+    _ensure_initialized()
+    with get_db_connection() as conn:
+        rows = conn.execute("SELECT id, text, expect FROM utterances ORDER BY id ASC;").fetchall()
+        utterances = []
+        for row in rows:
+            expect = {}
+            if row["expect"]:
+                try:
+                    expect = json.loads(row["expect"])
+                except Exception:
+                    pass
+            utterances.append({
+                "id": row["id"],
+                "text": row["text"],
+                "expect": expect
+            })
+        return utterances
+
+
+def save_utterances_to_db(utterances: List[Dict[str, Any]]) -> None:
+    """Overwrite all conversation utterances in SQLite."""
+    _ensure_initialized()
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM utterances;")
+        for u in utterances:
+            expect_json = json.dumps(u.get("expect") or {})
+            conn.execute(
+                "INSERT INTO utterances (id, text, expect) VALUES (?, ?, ?);",
+                (u["id"], u["text"], expect_json)
+            )
+        conn.commit()

@@ -74,7 +74,7 @@ async def run_evaluation(
     transport: str,
     run_id: str,
     num_turns: Optional[int] = None,
-    script_path: Optional[str] = None,
+    script: Optional[str | List[Dict[str, Any]]] = None,
 ) -> RunManifest:
     """Drive a single scripted evaluation end-to-end and return the final manifest.
 
@@ -94,9 +94,8 @@ async def run_evaluation(
         harness = EvaluationHarness(config, agent, api_key, run_id)
         ACTIVE_HARNESSES[run_id] = harness
 
-        utterances_file = script_path or os.path.join(settings.SCRIPT_DIR, "utterances.yaml")
         await harness.run_session(
-            utterances_file if os.path.exists(utterances_file) else None,
+            script,
             num_turns=num_turns,
         )
         return RunManifest.load(harness.manifest.manifest_path)
@@ -110,11 +109,11 @@ async def run_evaluation(
 
 async def run_evaluations_parallel(
     specs: list[tuple[str, str, str, str, Optional[int]]],
-    script_path: Optional[str] = None,
+    script: Optional[str | List[Dict[str, Any]]] = None,
 ) -> list[RunManifest]:
     """Run multiple ``(provider, model, transport, run_id, num_turns)`` specs in parallel."""
     return await asyncio.gather(*[
-        run_evaluation(p, m, t, rid, n, script_path) for p, m, t, rid, n in specs
+        run_evaluation(p, m, t, rid, n, script) for p, m, t, rid, n in specs
     ])
 
 

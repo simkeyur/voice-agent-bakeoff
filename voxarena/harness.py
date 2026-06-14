@@ -1,6 +1,7 @@
 import os
 import time
 import yaml
+import json
 import wave
 import asyncio
 from typing import List, Dict, Any, Optional
@@ -189,27 +190,43 @@ class EvaluationHarness:
             wf.writeframes(silent_data)
         logger.info(f"[Harness] Created dummy silent WAV at {file_path}")
 
-    async def run_session(self, utterances_file_path: Optional[str] = None, num_turns: Optional[int] = None):
+    async def run_session(self, script: Optional[str | List[Dict[str, Any]]] = None, num_turns: Optional[int] = None):
         """Executes the test suite inside a single continuous Pipecat session."""
         
-        # 1. Load Utterances from YAML
+        # 1. Load Utterances
         utterances = []
-        if utterances_file_path and os.path.exists(utterances_file_path):
-            with open(utterances_file_path, "r") as f:
-                utterances = yaml.safe_load(f)
+        if isinstance(script, list):
+            utterances = script
+        elif isinstance(script, str) and os.path.exists(script):
+            try:
+                with open(script, "r") as f:
+                    if script.endswith(".json"):
+                        utterances = json.load(f)
+                    else:
+                        utterances = yaml.safe_load(f)
+            except Exception as e:
+                logger.error(f"[Harness] Failed to load script from {script}: {e}")
         else:
-            # Fallback list for dry-runs
-            logger.warning("No utterances file provided or found. Using fallback dry-run script.")
-            utterances = [
-                {"id": "u01", "text": "Hello, what restaurant is this?", "expect": {}},
-                {"id": "u02", "text": "Are you open on Tuesdays at 2 PM?", "expect": {}},
-                {"id": "u03", "text": "Can I book a table for four tomorrow at seven pm?", "expect": {}},
-            ]
+            # Fall back to database load (UI mode)
+            try:
+                from voxarena.database import load_utterances_from_db
+                utterances = load_utterances_from_db()
+            except Exception as e:
+                logger.error(f"[Harness] Failed to load utterances from SQLite: {e}")
+
+            if not utterances:
+                # Fallback list for dry-runs
+                logger.warning("No utterances found. Using fallback dry-run script.")
+                utterances = [
+                    {"id": "u01", "text": "Hello, what restaurant is this?", "expect": {}},
+                    {"id": "u02", "text": "Are you open on Tuesdays at 2 PM?", "expect": {}},
+                    {"id": "u03", "text": "Can I book a table for four tomorrow at seven pm?", "expect": {}},
+                ]
             
         # Limit to the requested number of conversation turns
         if num_turns is not None and num_turns > 0:
             utterances = utterances[:num_turns]
-
+ 
         # Ensure audio files exist or create dummies for dry-run
         for utt in utterances:
             audio_path = os.path.join(settings.AUDIO_DIR, f"{utt['id']}.wav")

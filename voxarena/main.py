@@ -161,11 +161,13 @@ async def update_settings(req: SettingsUpdateRequest):
 
 @app.get("/api/utterances")
 async def get_utterances():
-    utterances_path = os.path.join(settings.SCRIPT_DIR, "utterances.yaml")
-    if not os.path.exists(utterances_path):
-        return {"content": ""}
-    with open(utterances_path, "r") as f:
-        return {"content": f.read()}
+    """Retrieve raw YAML of scripted conversation utterances (loaded from SQLite)."""
+    try:
+        utterances = load_utterances_from_db()
+        content = yaml.safe_dump(utterances, sort_keys=False, default_flow_style=False)
+        return {"content": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 class UtterancesUpdateRequest(BaseModel):
@@ -174,6 +176,7 @@ class UtterancesUpdateRequest(BaseModel):
 
 @app.post("/api/utterances")
 async def update_utterances(req: UtterancesUpdateRequest):
+    """Overwrite SQLite utterances from a raw YAML text payload."""
     try:
         parsed = yaml.safe_load(req.content)
     except yaml.YAMLError as e:
@@ -182,26 +185,20 @@ async def update_utterances(req: UtterancesUpdateRequest):
     if not isinstance(parsed, list):
         raise HTTPException(status_code=400, detail="Utterances YAML must be a list of utterance entries.")
 
-    utterances_path = os.path.join(settings.SCRIPT_DIR, "utterances.yaml")
-    with open(utterances_path, "w") as f:
-        f.write(req.content)
-
-    return {"status": "saved", "count": len(parsed)}
+    try:
+        save_utterances_to_db(parsed)
+        return {"status": "saved", "count": len(parsed)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/utterances/json")
 async def get_utterances_json():
-    utterances_path = os.path.join(settings.SCRIPT_DIR, "utterances.yaml")
-    if not os.path.exists(utterances_path):
-        return []
+    """Retrieve scripted conversation utterances as a parsed JSON array from SQLite."""
     try:
-        with open(utterances_path, "r") as f:
-            parsed = yaml.safe_load(f)
-        if isinstance(parsed, list):
-            return parsed
-        return []
+        return load_utterances_from_db()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse utterances YAML: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load utterances: {e}")
 
 
 class UtterancesJsonUpdateRequest(BaseModel):
@@ -210,14 +207,12 @@ class UtterancesJsonUpdateRequest(BaseModel):
 
 @app.post("/api/utterances/json")
 async def update_utterances_json(req: UtterancesJsonUpdateRequest):
-    utterances_path = os.path.join(settings.SCRIPT_DIR, "utterances.yaml")
+    """Overwrite SQLite utterances from a parsed JSON array."""
     try:
-        yaml_content = yaml.safe_dump(req.utterances, sort_keys=False, default_flow_style=False)
-        with open(utterances_path, "w") as f:
-            f.write(yaml_content)
+        save_utterances_to_db(req.utterances)
         return {"status": "saved", "count": len(req.utterances)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to serialize to YAML: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save utterances: {e}")
 
 
 @app.get("/api/runs", response_model=List[Dict[str, Any]])
