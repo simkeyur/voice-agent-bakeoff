@@ -1,850 +1,1506 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VoxArena Documentation — Realtime Voice Agent Evaluator</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>">
-  
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoxArena — Realtime Voice Agent Evaluator</title>
+  <meta name="description" content="Reproducible evaluation harness for realtime voice agents. Compare Gemini Live, OpenAI Realtime, and custom providers on latency, tool-call accuracy, and hallucinations." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <link rel="icon" type="image/png" href="logo-dark.png" />
 
   <style>
     :root[data-theme="dark"] {
-      --bg: #000000;
-      --surface: rgba(255, 255, 255, 0.03);
-      --surface-hover: rgba(255, 255, 255, 0.07);
-      --border: rgba(255, 255, 255, 0.09);
-      --border-accent: rgba(255, 255, 255, 0.25);
-      --code-bg: rgba(255, 255, 255, 0.08);
-      --pre-bg: rgba(255, 255, 255, 0.02);
-      
-      --fg: #ffffff;
-      --muted: rgba(255, 255, 255, 0.6);
-      --muted-light: rgba(255, 255, 255, 0.35);
-      
-      --primary: #ffffff;
-      --primary-light: #ffffff;
-      --primary-dark: #cccccc;
-      --accent: #ffffff;
-      --accent-light: #ffffff;
-      --error: #ff3355;
-      
-      --terminal-bg: rgba(0, 0, 0, 0.3);
-      --input-bg: rgba(255, 255, 255, 0.03);
-      --input-focus: rgba(255, 255, 255, 0.06);
+      --bg: #08090a;
+      --bg-elev: #0d0e10;
+      --surface: rgba(255, 255, 255, 0.025);
+      --surface-2: rgba(255, 255, 255, 0.045);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --code-bg: rgba(255, 255, 255, 0.05);
+
+      --fg: #f5f6f7;
+      --fg-muted: rgba(245, 246, 247, 0.62);
+      --fg-faint: rgba(245, 246, 247, 0.38);
+      --fg-success: #4ade80;
+      --fg-warn: #fbbf24;
+      --fg-error: #f87171;
+
+      --accent: #f5f6f7;
     }
 
     :root[data-theme="light"] {
-      --bg: #ffffff;
-      --surface: rgba(0, 0, 0, 0.02);
-      --surface-hover: rgba(0, 0, 0, 0.05);
+      --bg: #fbfbfc;
+      --bg-elev: #ffffff;
+      --surface: rgba(0, 0, 0, 0.025);
+      --surface-2: rgba(0, 0, 0, 0.045);
       --border: rgba(0, 0, 0, 0.08);
-      --border-accent: rgba(0, 0, 0, 0.18);
-      --code-bg: rgba(0, 0, 0, 0.05);
-      --pre-bg: rgba(0, 0, 0, 0.015);
-      
-      --fg: #000000;
-      --muted: rgba(0, 0, 0, 0.6);
-      --muted-light: rgba(0, 0, 0, 0.35);
-      
-      --primary: #000000;
-      --primary-light: #000000;
-      --primary-dark: #333333;
-      --accent: #000000;
-      --accent-light: #000000;
-      --error: #dd1133;
-      
-      --terminal-bg: rgba(0, 0, 0, 0.03);
-      --input-bg: rgba(0, 0, 0, 0.02);
-      --input-focus: rgba(0, 0, 0, 0.04);
+      --border-strong: rgba(0, 0, 0, 0.18);
+      --code-bg: rgba(0, 0, 0, 0.045);
+
+      --fg: #0a0b0c;
+      --fg-muted: rgba(10, 11, 12, 0.62);
+      --fg-faint: rgba(10, 11, 12, 0.38);
+      --fg-success: #16a34a;
+      --fg-warn: #b45309;
+      --fg-error: #dc2626;
+
+      --accent: #0a0b0c;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
 
     body {
-      background-color: var(--bg);
+      background: var(--bg);
       color: var(--fg);
-      font-family: var(--font-sans);
+      font-family: 'Inter', system-ui, sans-serif;
       font-size: 15px;
-      line-height: 1.7;
-      overflow-x: hidden;
-      display: flex;
-      transition: background-color 0.3s, color 0.3s;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      transition: background-color 0.2s, color 0.2s;
     }
 
-    /* Sidebar Navigation */
+    /* Layout */
+    .layout {
+      display: grid;
+      grid-template-columns: 256px 1fr;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* Sidebar */
     aside.sidebar {
-      width: 260px;
       height: 100vh;
-      position: fixed;
+      position: sticky;
       top: 0;
-      left: 0;
       border-right: 1px solid var(--border);
-      background-color: var(--bg);
-      display: flex;
-      flex-direction: column;
-      padding: 24px;
-      z-index: 100;
-    }
-
-    .logo-container {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 36px;
-    }
-
-    .logo-text {
-      font-family: var(--font-display);
-      font-size: 19px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      color: var(--fg);
-    }
-
-    .docs-pill {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      background-color: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--fg);
-      padding: 2px 6px;
-      border-radius: 12px;
-      margin-left: 2px;
-    }
-
-    .sidebar-nav {
+      padding: 28px 24px;
       display: flex;
       flex-direction: column;
       gap: 4px;
-      flex: 1;
+      overflow-y: auto;
     }
 
-    .nav-title {
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      color: var(--muted-light);
-      margin-top: 24px;
-      margin-bottom: 8px;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 32px;
     }
+
+    .brand img {
+      height: 26px;
+      width: auto;
+    }
+
+    .brand-pill {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--fg-muted);
+    }
+
+    .nav-section {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--fg-faint);
+      margin: 18px 8px 6px;
+    }
+
+    .nav-section:first-of-type { margin-top: 0; }
 
     .nav-link {
       display: flex;
       align-items: center;
       gap: 10px;
-      color: var(--muted);
-      text-decoration: none;
-      padding: 8px 12px;
+      padding: 7px 10px;
       border-radius: 6px;
+      font-size: 13.5px;
       font-weight: 500;
-      transition: background-color 0.2s, color 0.2s;
+      color: var(--fg-muted);
+      text-decoration: none;
+      transition: background 0.15s, color 0.15s;
     }
 
     .nav-link:hover {
-      background-color: var(--surface-hover);
+      background: var(--surface);
       color: var(--fg);
     }
 
     .nav-link.active {
-      background-color: var(--surface-hover);
-      border: 1px solid var(--border);
+      background: var(--surface-2);
       color: var(--fg);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
     }
 
-    .theme-switcher-container {
+    .nav-link svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      opacity: 0.8;
+    }
+
+    .sidebar-footer {
       margin-top: auto;
-      padding-top: 16px;
+      padding-top: 18px;
       border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
     }
 
-    .theme-btn {
-      width: 100%;
-      background-color: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--fg);
-      padding: 8px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-family: var(--font-sans);
-      font-size: 13px;
-      font-weight: 600;
-      display: flex;
+    .icon-btn {
+      flex: 1;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      transition: background-color 0.2s;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s, border-color 0.15s;
     }
 
-    .theme-btn:hover {
-      background-color: var(--surface-hover);
+    .icon-btn:hover {
+      background: var(--surface-2);
+      border-color: var(--border-strong);
     }
 
-    /* Main Container */
-    main.content-container {
-      margin-left: 260px;
-      width: calc(100% - 260px);
-      min-height: 100vh;
-      padding: 64px 80px;
-      max-width: 1000px;
+    .icon-btn svg { width: 14px; height: 14px; }
+
+    /* Main content */
+    main {
+      padding: 64px 72px 120px;
+      max-width: 880px;
+    }
+
+    @media (max-width: 1024px) {
+      .layout { grid-template-columns: 1fr; }
+      aside.sidebar { display: none; }
+      main { padding: 40px 24px 80px; }
     }
 
     section {
-      margin-bottom: 64px;
-      scroll-margin-top: 80px;
+      margin-bottom: 80px;
+      scroll-margin-top: 24px;
     }
 
-    h1, h2, h3 {
-      font-family: var(--font-display);
-      font-weight: 700;
-      letter-spacing: -0.3px;
+    /* Typography */
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+      margin-bottom: 16px;
     }
+
+    .eyebrow svg { width: 13px; height: 13px; }
 
     h1 {
-      font-size: 38px;
-      margin-bottom: 16px;
-      font-weight: 800;
-      color: var(--fg);
+      font-size: 44px;
+      line-height: 1.1;
+      font-weight: 700;
+      letter-spacing: -1.2px;
+      margin-bottom: 18px;
     }
 
     h2 {
-      font-size: 24px;
-      margin-top: 48px;
-      margin-bottom: 18px;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 10px;
-      color: var(--fg);
-      font-weight: 700;
+      font-size: 26px;
+      line-height: 1.2;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    h2 .anchor-icon {
+      width: 22px;
+      height: 22px;
+      color: var(--fg-faint);
     }
 
     h3 {
       font-size: 17px;
-      margin-top: 24px;
-      margin-bottom: 8px;
+      font-weight: 600;
+      margin-top: 28px;
+      margin-bottom: 10px;
+      letter-spacing: -0.2px;
+    }
+
+    p {
+      color: var(--fg-muted);
+      margin-bottom: 14px;
+      font-size: 15px;
+    }
+
+    p strong, li strong {
       color: var(--fg);
       font-weight: 600;
     }
 
-    p {
-      color: var(--muted);
-      margin-bottom: 16px;
-      font-size: 15px;
-      line-height: 1.7;
+    .lead {
+      font-size: 18px;
+      line-height: 1.55;
+      color: var(--fg-muted);
+      margin-bottom: 36px;
+      max-width: 720px;
     }
+
+    a { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: var(--border-strong); }
+    a:hover { text-decoration-color: var(--fg); }
 
     ul, ol {
-      margin-left: 20px;
-      margin-bottom: 16px;
-      color: var(--muted);
+      margin: 0 0 14px 18px;
+      color: var(--fg-muted);
     }
 
-    li {
-      margin-bottom: 8px;
-    }
+    li { margin-bottom: 6px; }
+    li::marker { color: var(--fg-faint); }
 
     code {
-      font-family: var(--font-mono);
-      background-color: var(--code-bg);
-      padding: 2px 6px;
+      font-family: 'JetBrains Mono', monospace;
+      background: var(--code-bg);
+      padding: 2px 5px;
       border-radius: 4px;
-      font-size: 0.9em;
+      font-size: 0.88em;
       color: var(--fg);
-      border: 1px solid var(--border);
     }
 
     pre {
-      font-family: var(--font-mono);
-      background-color: var(--pre-bg);
+      background: var(--bg-elev);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 18px;
-      overflow-x: auto;
+      overflow: hidden;
       margin: 16px 0;
       position: relative;
     }
 
+    pre .pre-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      color: var(--fg-faint);
+    }
+
+    pre .pre-header .filename {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    pre .pre-header svg { width: 13px; height: 13px; }
+
     pre code {
+      display: block;
       background: none;
-      padding: 0;
-      color: var(--fg);
+      padding: 16px 18px;
+      overflow-x: auto;
       font-size: 13px;
       line-height: 1.6;
-      border: none;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 3px 8px;
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      border-radius: 4px;
-      margin-right: 6px;
-    }
-
-    .badge-primary {
-      background-color: var(--surface);
-      border: 1px solid var(--border);
       color: var(--fg);
     }
 
-    .badge-accent {
-      background-color: var(--surface);
+    .copy-pre {
+      background: none;
       border: 1px solid var(--border);
-      color: var(--muted);
+      color: var(--fg-muted);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
     }
 
-    /* Grid Layouts */
-    .grid-container {
+    .copy-pre:hover { background: var(--surface-2); color: var(--fg); }
+
+    /* Cards */
+    .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
       margin: 24px 0;
     }
 
     .card {
-      background-color: var(--surface);
+      background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px;
-      transition: border-color 0.2s, background-color 0.2s;
+      border-radius: 10px;
+      padding: 22px;
+      transition: border-color 0.15s, background 0.15s;
     }
 
     .card:hover {
-      border-color: var(--border-accent);
-      background-color: var(--surface-hover);
+      border-color: var(--border-strong);
+      background: var(--surface-2);
     }
+
+    .card-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+    }
+
+    .card-icon svg { width: 16px; height: 16px; color: var(--fg); }
 
     .card h3 {
       margin-top: 0;
-      margin-bottom: 12px;
+      margin-bottom: 6px;
+      font-size: 15px;
     }
 
-    /* Info Alert Callouts */
-    .alert-box {
-      background-color: var(--surface);
-      border-left: 3px solid var(--fg);
-      border-radius: 0 6px 6px 0;
-      padding: 16px 20px;
-      margin: 24px 0;
-      border-top: 1px solid var(--border);
-      border-right: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .alert-box p {
+    .card p {
       margin-bottom: 0;
-      color: var(--fg);
+      font-size: 13.5px;
+      color: var(--fg-muted);
     }
 
-    /* Tab Switcher for code blocks */
-    .tab-switcher {
+    /* Callout */
+    .callout {
       display: flex;
-      gap: 8px;
-      margin-top: 16px;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 8px;
-    }
-
-    .tab-btn {
-      background: none;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      padding: 4px 12px;
-      border-radius: 4px;
-      transition: color 0.2s, background-color 0.2s;
-    }
-
-    .tab-btn:hover {
-      color: var(--fg);
-    }
-
-    .tab-btn.active {
-      color: var(--fg);
-      background-color: var(--surface);
-    }
-
-    /* Interactive Command Builder */
-    .builder-widget {
+      gap: 14px;
+      padding: 16px 18px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 28px;
-      margin: 32px 0;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+
+    .callout svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      margin-top: 1px;
+      color: var(--fg);
+    }
+
+    .callout-body { font-size: 14px; color: var(--fg-muted); }
+    .callout-body strong { color: var(--fg); }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      margin: 18px 0 0;
+    }
+
+    .tab {
+      background: none;
+      border: none;
+      color: var(--fg-muted);
+      padding: 8px 14px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .tab:hover { color: var(--fg); }
+    .tab.active {
+      color: var(--fg);
+      border-bottom-color: var(--fg);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Flow diagrams */
+    .diagram {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 24px;
+      margin: 24px 0;
+      overflow-x: auto;
+    }
+
+    .diagram-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--fg-faint);
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .diagram-title svg { width: 13px; height: 13px; }
+
+    .diagram svg { width: 100%; height: auto; color: var(--fg); }
+
+    .diagram svg text {
+      fill: currentColor;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .diagram svg .node {
+      fill: var(--surface);
+      stroke: var(--border-strong);
+      stroke-width: 1;
+    }
+
+    .diagram svg .node-strong {
+      fill: var(--surface-2);
+      stroke: var(--fg);
+      stroke-width: 1.2;
+    }
+
+    .diagram svg .edge {
+      stroke: var(--border-strong);
+      stroke-width: 1.2;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+
+    .diagram svg .edge-strong {
+      stroke: var(--fg);
+      stroke-width: 1.4;
+      fill: none;
+      marker-end: url(#arrow-strong);
+    }
+
+    .diagram svg .label {
+      font-size: 12.5px;
+      font-weight: 500;
+    }
+
+    .diagram svg .sublabel {
+      font-size: 10.5px;
+      fill: var(--fg-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Mock report card */
+    .mock-report {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 20px 0;
+    }
+
+    .mock-report-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .mock-report-head .run-title {
+      font-weight: 600;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mock-report-head .run-title svg { width: 14px; height: 14px; }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+
+    .status-pill.pass { color: var(--fg-success); }
+    .status-pill.fail { color: var(--fg-error); }
+    .status-pill svg { width: 11px; height: 11px; }
+
+    .mock-report-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+    }
+
+    .metric {
+      padding: 16px 18px;
+      border-right: 1px solid var(--border);
+    }
+
+    .metric:last-child { border-right: none; }
+
+    .metric-label {
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--fg-faint);
+      margin-bottom: 4px;
+    }
+
+    .metric-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+
+    .metric-value.pass { color: var(--fg-success); }
+    .metric-value.warn { color: var(--fg-warn); }
+
+    .metric-value small {
+      font-size: 11px;
+      color: var(--fg-muted);
+      margin-left: 4px;
+      font-weight: 400;
+    }
+
+    @media (max-width: 640px) {
+      .mock-report-grid { grid-template-columns: repeat(2, 1fr); }
+      .metric:nth-child(2) { border-right: none; }
+      .metric:nth-child(1), .metric:nth-child(2) { border-bottom: 1px solid var(--border); }
+    }
+
+    /* Builder */
+    .builder {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+      margin: 20px 0;
     }
 
     .builder-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 24px;
-      margin-bottom: 24px;
+      gap: 16px;
+      margin-bottom: 20px;
     }
 
-    @media (max-width: 768px) {
-      .builder-grid {
-        grid-template-columns: 1fr;
-      }
+    @media (max-width: 640px) {
+      .builder-grid { grid-template-columns: 1fr; }
     }
 
-    .form-group {
+    .field {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
 
-    label {
-      font-size: 13px;
-      font-weight: 600;
+    .field label {
+      font-size: 12px;
+      font-weight: 500;
       color: var(--fg);
       display: flex;
       justify-content: space-between;
     }
 
-    .label-val {
-      color: var(--fg);
-      opacity: 0.8;
+    .field label .field-hint {
+      color: var(--fg-faint);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 400;
     }
 
-    select, input[type="text"], input[type="number"] {
-      background-color: var(--input-bg);
+    .field select,
+    .field input[type="text"],
+    .field input[type="number"] {
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 6px;
       color: var(--fg);
-      padding: 8px 12px;
-      font-size: 14px;
+      font-family: inherit;
+      font-size: 13.5px;
+      padding: 7px 10px;
       outline: none;
-      transition: border-color 0.2s, background-color 0.2s;
+      transition: border-color 0.15s, background 0.15s;
     }
 
-    select:focus, input[type="text"]:focus, input[type="number"]:focus {
-      border-color: var(--border-accent);
-      background-color: var(--input-focus);
+    .field select:focus,
+    .field input:focus {
+      border-color: var(--border-strong);
+      background: var(--surface-2);
     }
 
-    input[type="range"] {
+    .field input[type="range"] {
       -webkit-appearance: none;
-      width: 100%;
       height: 4px;
       background: var(--border);
       border-radius: 2px;
       outline: none;
-      margin: 10px 0;
+      margin: 8px 0;
     }
 
-    input[type="range"]::-webkit-slider-thumb {
+    .field input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      appearance: none;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
+      width: 14px;
+      height: 14px;
       background: var(--fg);
+      border-radius: 50%;
       cursor: pointer;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
     }
 
-    .terminal-container {
-      background-color: var(--terminal-bg);
+    .builder-output {
+      background: var(--bg);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px 20px;
+      border-radius: 6px;
+      padding: 14px 16px;
       position: relative;
-      font-family: var(--font-mono);
-      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      line-height: 1.65;
       color: var(--fg);
+      white-space: pre-wrap;
       word-break: break-all;
-      line-height: 1.6;
     }
 
-    .copy-btn {
+    .builder-output .copy-pre {
       position: absolute;
-      top: 12px;
-      right: 12px;
-      background-color: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--fg);
-      border-radius: 4px;
-      padding: 4px 10px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      cursor: pointer;
-      transition: background-color 0.2s, border-color 0.2s;
-    }
-
-    .copy-btn:hover {
-      background-color: var(--surface-hover);
-      border-color: var(--border-accent);
-    }
-
-    .copy-btn.copied {
-      background-color: var(--surface-hover);
-      border-color: var(--fg);
-      color: var(--fg);
-    }
-
-    /* Responsive adjustments */
-    @media (max-width: 992px) {
-      aside.sidebar {
-        display: none;
-      }
-      main.content-container {
-        margin-left: 0;
-        width: 100%;
-        padding: 40px 24px;
-      }
+      top: 10px;
+      right: 10px;
     }
   </style>
 </head>
 <body>
 
-  <!-- Sidebar Nav -->
-  <aside class="sidebar">
-    <div class="logo-container">
-      <img id="logo-img" src="logo-dark.png" alt="VoxArena Logo" style="height: 28px; width: auto; object-fit: contain;" />
-      <span class="docs-pill">docs</span>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-title">Overview</div>
-      <a href="#intro" class="nav-link active" onclick="setActive(this)">Introduction</a>
-      <a href="#quickstart" class="nav-link" onclick="setActive(this)">Quick Start</a>
-      
-      <div class="nav-title">Guides</div>
-      <a href="#web-ui" class="nav-link" onclick="setActive(this)">Web Control Panel</a>
-      <a href="#cli" class="nav-link" onclick="setActive(this)">Headless CLI</a>
-      
-      <div class="nav-title">Interactive</div>
-      <a href="#cli-builder" class="nav-link" onclick="setActive(this)">CLI Command Builder</a>
-      
-      <div class="nav-title">Extension</div>
-      <a href="#extend" class="nav-link" onclick="setActive(this)">Extend Adapter</a>
-    </nav>
+<!-- Lucide icon sprite — defined once, referenced via <use> below -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></symbol>
+    <symbol id="i-layout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" x2="21" y1="9" y2="9"/><line x1="9" x2="9" y1="21" y2="9"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+    <symbol id="i-puzzle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.5 2.5 0 1 0-3.214 3.214c.446.166.855.497.925.968a.98.98 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+    <symbol id="i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></symbol>
+    <symbol id="i-bar-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-git-branch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+    <symbol id="i-workflow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></symbol>
+  </defs>
+</svg>
 
-    <!-- Theme Switcher -->
-    <div class="theme-switcher-container">
-      <button class="theme-btn" onclick="toggleTheme()">
-        <span id="theme-icon">☀️</span> <span id="theme-text">Light Mode</span>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <img id="brand-logo" src="logo-dark.png" alt="VoxArena" />
+      <span class="brand-pill">Docs</span>
+    </div>
+
+    <div class="nav-section">Overview</div>
+    <a href="#intro" class="nav-link" data-nav><svg><use href="#i-book"/></svg>Introduction</a>
+    <a href="#architecture" class="nav-link" data-nav><svg><use href="#i-layout"/></svg>How it works</a>
+    <a href="#quickstart" class="nav-link" data-nav><svg><use href="#i-rocket"/></svg>Quick start</a>
+
+    <div class="nav-section">Modes</div>
+    <a href="#web-ui" class="nav-link" data-nav><svg><use href="#i-layout"/></svg>Web control panel</a>
+    <a href="#cli" class="nav-link" data-nav><svg><use href="#i-terminal"/></svg>Headless CLI</a>
+
+    <div class="nav-section">Reference</div>
+    <a href="#script" class="nav-link" data-nav><svg><use href="#i-file"/></svg>Script format</a>
+    <a href="#metrics" class="nav-link" data-nav><svg><use href="#i-bar-chart"/></svg>Metrics</a>
+    <a href="#builder" class="nav-link" data-nav><svg><use href="#i-wrench"/></svg>Command builder</a>
+    <a href="#extend" class="nav-link" data-nav><svg><use href="#i-puzzle"/></svg>Custom adapter</a>
+
+    <div class="sidebar-footer">
+      <a class="icon-btn" href="https://github.com/simkeyur/voice-agent-bakeoff" target="_blank" rel="noopener">
+        <svg><use href="#i-github"/></svg> GitHub
+      </a>
+      <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme">
+        <svg id="theme-icon"><use href="#i-sun"/></svg>
+        <span id="theme-label">Light</span>
       </button>
     </div>
   </aside>
 
-  <!-- Content -->
-  <main class="content-container">
-    
+  <main>
+
     <section id="intro">
-      <h1>VoxArena</h1>
-      <p><strong>VoxArena</strong> is a fully-reproducible evaluation arena and benchmarking harness for realtime voice agents. It enables you to run identical scripted conversation turns across different LLM providers (e.g., Google Gemini Live, OpenAI Realtime) and score them side-by-side on latency, tool-call accuracy, and hallucinations.</p>
-      
-      <div class="grid-container">
+      <div class="eyebrow"><svg><use href="#i-mic"/></svg>Realtime voice evaluation</div>
+      <h1>The bench for realtime voice agents.</h1>
+      <p class="lead">
+        VoxArena is a reproducible evaluation harness that runs identical scripted conversations
+        against Gemini Live, OpenAI Realtime, and your own Pipecat-based providers — and scores
+        them on latency, tool-call accuracy, and hallucinations.
+      </p>
+
+      <div class="grid">
         <div class="card">
-          <span class="badge badge-primary">Database-Backed</span>
-          <h3>Web Control Panel</h3>
-          <p>A self-contained React app that allows you to manage credentials, visually edit prompts, trigger comparison runs, and browse results without writing a single line of code.</p>
+          <span class="card-icon"><svg><use href="#i-layout"/></svg></span>
+          <h3>Web control panel</h3>
+          <p>Configure credentials, edit prompts and utterances, kick off side-by-side runs, and browse results — no code.</p>
         </div>
         <div class="card">
-          <span class="badge badge-accent">Stateless</span>
+          <span class="card-icon"><svg><use href="#i-terminal"/></svg></span>
           <h3>Headless CLI</h3>
-          <p>A lightweight, file-driven CLI designed for integration directly into CI/CD pipelines. It consumes standard JSON or YAML script definitions and returns JUnit test results.</p>
+          <p>File-driven runner for CI. Consumes JSON / YAML scripts, emits JUnit XML, and exits non-zero on regression.</p>
+        </div>
+        <div class="card">
+          <span class="card-icon"><svg><use href="#i-database"/></svg></span>
+          <h3>Reproducible by design</h3>
+          <p>Every run pins prompt hash, tool schema hash, model id, and transport — and persists turn-level traces to SQLite.</p>
         </div>
       </div>
+    </section>
+
+    <section id="architecture">
+      <h2><svg class="anchor-icon"><use href="#i-workflow"/></svg>How it works</h2>
+      <p>
+        Both modes share the same evaluation core. A scripted utterance is injected as raw PCM
+        audio into a Pipecat pipeline; the provider's realtime LLM streams back text and audio
+        frames; observers along the pipeline timestamp every event and score the turn against the
+        script's <code>expect</code> block.
+      </p>
+
+      <div class="diagram">
+        <div class="diagram-title"><svg><use href="#i-workflow"/></svg>Pipeline architecture</div>
+        <svg viewBox="0 0 820 280" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor" opacity="0.65"/>
+            </marker>
+            <marker id="arrow-strong" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          <!-- Row 1: Pipeline -->
+          <rect class="node" x="20"  y="80" width="130" height="56" rx="8"/>
+          <text class="label" x="85"  y="105" text-anchor="middle">Script utterance</text>
+          <text class="sublabel" x="85" y="123" text-anchor="middle">u01.wav · text</text>
+
+          <rect class="node" x="180" y="80" width="130" height="56" rx="8"/>
+          <text class="label" x="245" y="105" text-anchor="middle">Audio injector</text>
+          <text class="sublabel" x="245" y="123" text-anchor="middle">20ms PCM chunks</text>
+
+          <rect class="node-strong" x="340" y="80" width="140" height="56" rx="8"/>
+          <text class="label" x="410" y="105" text-anchor="middle">Realtime LLM</text>
+          <text class="sublabel" x="410" y="123" text-anchor="middle">Gemini · OpenAI</text>
+
+          <rect class="node" x="510" y="80" width="130" height="56" rx="8"/>
+          <text class="label" x="575" y="105" text-anchor="middle">Audio capture</text>
+          <text class="sublabel" x="575" y="123" text-anchor="middle">WAV per turn</text>
+
+          <rect class="node" x="670" y="80" width="130" height="56" rx="8"/>
+          <text class="label" x="735" y="105" text-anchor="middle">Metrics collector</text>
+          <text class="sublabel" x="735" y="123" text-anchor="middle">TTFA · tools</text>
+
+          <path class="edge" d="M150 108 L180 108"/>
+          <path class="edge" d="M310 108 L340 108"/>
+          <path class="edge-strong" d="M480 108 L510 108"/>
+          <path class="edge" d="M640 108 L670 108"/>
+
+          <!-- Outputs -->
+          <rect class="node" x="280" y="200" width="140" height="56" rx="8"/>
+          <text class="label" x="350" y="225" text-anchor="middle">manifest.json</text>
+          <text class="sublabel" x="350" y="243" text-anchor="middle">disk · run dir</text>
+
+          <rect class="node" x="450" y="200" width="140" height="56" rx="8"/>
+          <text class="label" x="520" y="225" text-anchor="middle">SQLite</text>
+          <text class="sublabel" x="520" y="243" text-anchor="middle">runs · turns · settings</text>
+
+          <path class="edge" d="M735 140 C 735 180, 590 180, 520 200"/>
+          <path class="edge" d="M735 140 C 735 180, 420 180, 350 200"/>
+        </svg>
+      </div>
+
+      <p>
+        The output of any run — text transcript, captured audio, per-turn timings, tool-call
+        validation — is mirrored to both a human-readable <code>manifest.json</code> on disk and a
+        SQLite database for the UI and the CLI to query.
+      </p>
     </section>
 
     <section id="quickstart">
-      <h2>🚀 Installation & Quick Start</h2>
-      <p>Install the library directly from PyPI. The package automatically ships both the headless evaluation runtime and the bundled React static assets.</p>
-      <pre><code>pip install voxarena</code></pre>
-      
-      <p>Boot the web-based control panel. The server will initialize, automatically bootstrap default test scripts and prerecorded audio files into your current directory, and open the control panel UI in your browser:</p>
-      <pre><code>voxarena ui</code></pre>
+      <h2><svg class="anchor-icon"><use href="#i-rocket"/></svg>Quick start</h2>
+      <p>Install from PyPI. The wheel ships the Python runtime and the compiled React control panel.</p>
+
+      <pre>
+        <div class="pre-header">
+          <span class="filename"><svg><use href="#i-terminal"/></svg>shell</span>
+          <button class="copy-pre" data-copy>Copy</button>
+        </div><code>pip install voxarena</code></pre>
+
+      <p>Launch the control panel in any working directory. On first run it bootstraps a sample
+      restaurant-reservation script (Saffron Leaf) plus pre-recorded audio.</p>
+
+      <pre>
+        <div class="pre-header">
+          <span class="filename"><svg><use href="#i-terminal"/></svg>shell</span>
+          <button class="copy-pre" data-copy>Copy</button>
+        </div><code>voxarena ui                # opens http://127.0.0.1:8000</code></pre>
+
+      <p>Or run a single headless evaluation and exit on threshold:</p>
+
+      <pre>
+        <div class="pre-header">
+          <span class="filename"><svg><use href="#i-terminal"/></svg>shell</span>
+          <button class="copy-pre" data-copy>Copy</button>
+        </div><code>voxarena run --provider gemini \
+  --script ./script/utterances.json \
+  --min-tool-accuracy 0.95 \
+  --max-avg-ttfa-ms 1800</code></pre>
+
+      <div class="callout">
+        <svg><use href="#i-info"/></svg>
+        <div class="callout-body">
+          <strong>API keys.</strong> Set <code>GOOGLE_API_KEY</code> and / or <code>OPENAI_API_KEY</code>
+          in your environment, in a local <code>.env</code> file, or via the Settings page of the
+          control panel. The UI persists them to SQLite so a packaged install needs no source checkout.
+        </div>
+      </div>
     </section>
 
     <section id="web-ui">
-      <h2>🖥️ Web Control Panel UI</h2>
-      <p>The control panel runs locally at <code>http://127.0.0.1:8000</code>. It runs completely self-contained, using SQLite to persist everything. You don't need a local code checkout or a <code>.env</code> file.</p>
-      
-      <h3>Key Features</h3>
-      <ul>
-        <li><strong>Credential & Model Isolation:</strong> Configure API Keys independently. Models can be selected from recommended preloaded realtime models or written in via the custom selector.</li>
-        <li><strong>Interactive Utterances Editor:</strong> Manage conversation turns inside a visual grid. Configure prompts and specify check validators (e.g. expected response substring or expected tool name and parameters).</li>
-        <li><strong>Live Visualizer:</strong> Track in-flight evaluations. Read real-time transcripts, play back agent audio response files, and verify tool execution logs.</li>
-      </ul>
-      
-      <div class="alert-box">
-        <p><strong>Auto-Bootstrapping:</strong> Launching <code>voxarena ui</code> inside an empty directory will automatically unpack the default restaurant reservation script (Saffron Leaf) and its audio assets into the local folder so you can start testing immediately.</p>
+      <h2><svg class="anchor-icon"><use href="#i-layout"/></svg>Web control panel</h2>
+      <p>
+        The control panel is a self-contained React app served from the same FastAPI process as the
+        evaluation runtime. It's the right mode for exploratory work: tuning prompts, comparing
+        providers head-to-head, and inspecting failed turns.
+      </p>
+
+      <div class="diagram">
+        <div class="diagram-title"><svg><use href="#i-workflow"/></svg>Control panel flow</div>
+        <svg viewBox="0 0 820 320" xmlns="http://www.w3.org/2000/svg">
+          <rect class="node" x="20"  y="20" width="160" height="50" rx="8"/>
+          <text class="label" x="100" y="42" text-anchor="middle">Configure keys</text>
+          <text class="sublabel" x="100" y="58" text-anchor="middle">/settings</text>
+
+          <rect class="node" x="20" y="100" width="160" height="50" rx="8"/>
+          <text class="label" x="100" y="122" text-anchor="middle">Edit utterances</text>
+          <text class="sublabel" x="100" y="138" text-anchor="middle">visual grid editor</text>
+
+          <rect class="node" x="20" y="180" width="160" height="50" rx="8"/>
+          <text class="label" x="100" y="202" text-anchor="middle">Pick providers</text>
+          <text class="sublabel" x="100" y="218" text-anchor="middle">gemini · openai</text>
+
+          <rect class="node-strong" x="260" y="100" width="160" height="50" rx="8"/>
+          <text class="label" x="340" y="122" text-anchor="middle">Run comparison</text>
+          <text class="sublabel" x="340" y="138" text-anchor="middle">POST /api/run/compare</text>
+
+          <rect class="node" x="500" y="20" width="160" height="50" rx="8"/>
+          <text class="label" x="580" y="42" text-anchor="middle">Gemini run</text>
+          <text class="sublabel" x="580" y="58" text-anchor="middle">parallel</text>
+
+          <rect class="node" x="500" y="180" width="160" height="50" rx="8"/>
+          <text class="label" x="580" y="202" text-anchor="middle">OpenAI run</text>
+          <text class="sublabel" x="580" y="218" text-anchor="middle">parallel</text>
+
+          <rect class="node-strong" x="500" y="260" width="280" height="50" rx="8"/>
+          <text class="label" x="640" y="282" text-anchor="middle">Side-by-side run report</text>
+          <text class="sublabel" x="640" y="298" text-anchor="middle">transcripts · audio · metrics</text>
+
+          <path class="edge" d="M180 45  C 220 45,  220 110, 260 120"/>
+          <path class="edge" d="M180 125 L 260 125"/>
+          <path class="edge" d="M180 205 C 220 205, 220 140, 260 130"/>
+
+          <path class="edge-strong" d="M420 115 C 460 115, 460 45,  500 45"/>
+          <path class="edge-strong" d="M420 135 C 460 135, 460 205, 500 205"/>
+
+          <path class="edge" d="M580 70  C 580 130, 640 230, 640 260"/>
+          <path class="edge" d="M580 180 C 580 150, 640 240, 640 260"/>
+        </svg>
       </div>
+
+      <h3>What the run report shows</h3>
+      <p>Each completed run renders a card like this for quick at-a-glance comparison:</p>
+
+      <div class="mock-report">
+        <div class="mock-report-head">
+          <span class="run-title"><svg><use href="#i-mic"/></svg>gemini · gemini-3.1-flash-live-preview</span>
+          <span class="status-pill pass"><svg><use href="#i-check"/></svg>completed</span>
+        </div>
+        <div class="mock-report-grid">
+          <div class="metric">
+            <div class="metric-label">Avg TTFA</div>
+            <div class="metric-value pass">412<small>ms</small></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Tool accuracy</div>
+            <div class="metric-value pass">19 / 20</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Hallucinations</div>
+            <div class="metric-value">0</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Interruption</div>
+            <div class="metric-value warn">284<small>ms</small></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-report">
+        <div class="mock-report-head">
+          <span class="run-title"><svg><use href="#i-mic"/></svg>openai · gpt-realtime-2</span>
+          <span class="status-pill fail"><svg><use href="#i-x"/></svg>1 turn failed</span>
+        </div>
+        <div class="mock-report-grid">
+          <div class="metric">
+            <div class="metric-label">Avg TTFA</div>
+            <div class="metric-value warn">687<small>ms</small></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Tool accuracy</div>
+            <div class="metric-value">18 / 20</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Hallucinations</div>
+            <div class="metric-value">1</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Interruption</div>
+            <div class="metric-value pass">198<small>ms</small></div>
+          </div>
+        </div>
+      </div>
+
+      <h3>Realistic workflow</h3>
+      <ol>
+        <li>Paste your API keys into the Settings page — they persist to SQLite.</li>
+        <li>Open the Utterances editor and write 5–20 turns with <code>expect</code> blocks.</li>
+        <li>Pick a transport (direct injection for speed, WebRTC for production realism), then hit <strong>Run comparison</strong>.</li>
+        <li>Watch transcripts stream in for both providers, then drill into any failed turn to see the captured audio and the exact tool-call payload.</li>
+      </ol>
     </section>
 
     <section id="cli">
-      <h2>⚙️ Headless CLI Engine & Scripting</h2>
-      <p>For regression testing, CI integration, or headless runners, the CLI consumes local scripts and exits with status <code>0</code> or <code>1</code> based on metrics thresholds.</p>
-      
-      <h3>Running a Script</h3>
-      <pre><code>voxarena run --provider gemini --script ./script/utterances.json --min-tool-accuracy 0.95 --junit report.xml</code></pre>
-      
-      <h3>Conversation Script Format</h3>
-      <p>You can define conversation turns in either JSON or YAML format. In both modes, each turn specifies the phrase to say (or an audio WAV input matching the turn ID) and the expectations to check.</p>
+      <h2><svg class="anchor-icon"><use href="#i-terminal"/></svg>Headless CLI</h2>
+      <p>
+        The CLI is the right mode for CI and nightly regression. It is fully file-driven, never
+        prompts for input, and exits non-zero the moment a threshold is breached. The same
+        evaluation core powers both modes — runs from CI show up in the control panel verbatim.
+      </p>
 
-      <div class="tab-switcher">
-        <button class="tab-btn active" onclick="switchScriptTab('json')">JSON Format</button>
-        <button class="tab-btn" onclick="switchScriptTab('yaml')">YAML Format</button>
+      <div class="diagram">
+        <div class="diagram-title"><svg><use href="#i-git-branch"/></svg>CI integration flow</div>
+        <svg viewBox="0 0 820 240" xmlns="http://www.w3.org/2000/svg">
+          <rect class="node" x="20"  y="90" width="120" height="60" rx="8"/>
+          <text class="label" x="80" y="115" text-anchor="middle">Push / PR</text>
+          <text class="sublabel" x="80" y="133" text-anchor="middle">git</text>
+
+          <rect class="node" x="170" y="90" width="140" height="60" rx="8"/>
+          <text class="label" x="240" y="115" text-anchor="middle">GitHub Actions</text>
+          <text class="sublabel" x="240" y="133" text-anchor="middle">pip install voxarena</text>
+
+          <rect class="node-strong" x="340" y="90" width="160" height="60" rx="8"/>
+          <text class="label" x="420" y="115" text-anchor="middle">voxarena compare</text>
+          <text class="sublabel" x="420" y="133" text-anchor="middle">parallel providers</text>
+
+          <rect class="node" x="530" y="20" width="140" height="50" rx="8"/>
+          <text class="label" x="600" y="42" text-anchor="middle">JUnit XML</text>
+          <text class="sublabel" x="600" y="58" text-anchor="middle">CI test report</text>
+
+          <rect class="node" x="530" y="95" width="140" height="50" rx="8"/>
+          <text class="label" x="600" y="117" text-anchor="middle">JSON summary</text>
+          <text class="sublabel" x="600" y="133" text-anchor="middle">stdout · --output</text>
+
+          <rect class="node" x="530" y="170" width="140" height="50" rx="8"/>
+          <text class="label" x="600" y="192" text-anchor="middle">Exit 0 / 1</text>
+          <text class="sublabel" x="600" y="208" text-anchor="middle">block PR on regression</text>
+
+          <rect class="node" x="700" y="95" width="100" height="50" rx="8"/>
+          <text class="label" x="750" y="117" text-anchor="middle">PR comment</text>
+          <text class="sublabel" x="750" y="133" text-anchor="middle">artifact</text>
+
+          <path class="edge" d="M140 120 L 170 120"/>
+          <path class="edge" d="M310 120 L 340 120"/>
+          <path class="edge-strong" d="M500 110 C 515 110, 515 45,  530 45"/>
+          <path class="edge-strong" d="M500 120 L 530 120"/>
+          <path class="edge-strong" d="M500 130 C 515 130, 515 195, 530 195"/>
+          <path class="edge" d="M670 120 L 700 120"/>
+        </svg>
       </div>
 
-      <div id="script-json">
-        <pre><code>[
+      <h3>Compare two providers in CI</h3>
+
+      <pre>
+        <div class="pre-header">
+          <span class="filename"><svg><use href="#i-file"/></svg>.github/workflows/voice-regression.yml</span>
+          <button class="copy-pre" data-copy>Copy</button>
+        </div><code>name: voice-regression
+on: [pull_request]
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - run: pip install voxarena
+
+      - name: Compare Gemini vs OpenAI
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          voxarena compare \
+            --providers gemini,openai \
+            --script ./script/utterances.json \
+            --min-tool-accuracy 0.9 \
+            --max-avg-ttfa-ms 1800 \
+            --max-hallucinations 0 \
+            --output voxarena-result.json \
+            --junit voxarena-junit.xml
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voxarena-report
+          path: |
+            voxarena-result.json
+            voxarena-junit.xml</code></pre>
+
+      <h3>What you get back</h3>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="json-out">JSON summary</button>
+        <button class="tab" data-tab="junit-out">JUnit XML</button>
+      </div>
+
+      <div class="tab-panel active" id="json-out">
+        <pre>
+        <div class="pre-header">
+          <span class="filename"><svg><use href="#i-file"/></svg>voxarena-result.json</span>
+          <button class="copy-pre" data-copy>Copy</button>
+        </div><code>{
+  "passed": false,
+  "runs": [
+    {
+      "run_id": "run_1718294412_8f3a1c92",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-live-preview",
+      "status": "completed",
+      "metrics": {
+        "total_turns": 20,
+        "average_ttfa_ms": 412.3,
+        "average_interruption_stop_latency_ms": 284.1,
+        "tool_call_accuracy_rate": 0.95,
+        "hallucination_count": 0
+      },
+      "thresholds": [
+        { "name": "min_tool_accuracy", "required": 0.9, "actual": 0.95, "passed": true },
+        { "name": "max_avg_ttfa_ms",   "required": 1800, "actual": 412.3, "passed": true },
+        { "name": "max_hallucinations", "required": 0, "actual": 0, "passed": true }
+      ],
+      "passed": true
+    },
+    {
+      "run_id": "run_1718294412_8f3a1c92_openai",
+      "provider": "openai",
+      "model": "gpt-realtime-2",
+      "status": "completed",
+      "metrics": {
+        "total_turns": 20,
+        "average_ttfa_ms": 687.4,
+        "tool_call_accuracy_rate": 0.90,
+        "hallucination_count": 1
+      },
+      "thresholds": [
+        { "name": "max_hallucinations", "required": 0, "actual": 1, "passed": false }
+      ],
+      "passed": false
+    }
+  ]
+}</code></pre>
+      </div>
+
+      <div class="tab-panel" id="junit-out">
+        <pre>
+        <div class="pre-header">
+          <span class="filename"><svg><use href="#i-file"/></svg>voxarena-junit.xml</span>
+          <button class="copy-pre" data-copy>Copy</button>
+        </div><code>&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;testsuites&gt;
+  &lt;testsuite name="voxarena.gemini" tests="3" failures="0"&gt;
+    &lt;testcase name="min_tool_accuracy"  classname="voxarena.gemini" /&gt;
+    &lt;testcase name="max_avg_ttfa_ms"    classname="voxarena.gemini" /&gt;
+    &lt;testcase name="max_hallucinations" classname="voxarena.gemini" /&gt;
+  &lt;/testsuite&gt;
+  &lt;testsuite name="voxarena.openai" tests="3" failures="1"&gt;
+    &lt;testcase name="min_tool_accuracy"  classname="voxarena.openai" /&gt;
+    &lt;testcase name="max_avg_ttfa_ms"    classname="voxarena.openai" /&gt;
+    &lt;testcase name="max_hallucinations" classname="voxarena.openai"&gt;
+      &lt;failure message="required 0, got 1" /&gt;
+    &lt;/testcase&gt;
+  &lt;/testsuite&gt;
+&lt;/testsuites&gt;</code></pre>
+      </div>
+    </section>
+
+    <section id="script">
+      <h2><svg class="anchor-icon"><use href="#i-file"/></svg>Script format</h2>
+      <p>
+        A script is an ordered list of <strong>utterances</strong>. Each utterance has a stable
+        <code>id</code> (used to look up the matching <code>{id}.wav</code> audio file), the spoken
+        <code>text</code>, and an optional <code>expect</code> block that defines pass / fail for
+        that turn. Both JSON and YAML are accepted.
+      </p>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="script-json">JSON</button>
+        <button class="tab" data-tab="script-yaml">YAML</button>
+      </div>
+
+      <div class="tab-panel active" id="script-json">
+        <pre>
+        <div class="pre-header">
+          <span class="filename"><svg><use href="#i-file"/></svg>script/utterances.json</span>
+          <button class="copy-pre" data-copy>Copy</button>
+        </div><code>[
   {
     "id": "u01",
-    "text": "Hello, is this the Saffron Leaf restaurant?",
+    "text": "Hi, is this the Saffron Leaf restaurant?",
     "expect": {
-      "response": "Saffron Leaf"
+      "response_contains": ["Saffron Leaf"]
     }
   },
   {
     "id": "u02",
-    "text": "Can I book a table for tomorrow at seven pm?",
+    "text": "Are you open this Friday at 8pm?",
+    "expect": {
+      "tool": "check_availability",
+      "args": { "day": "Friday", "time": "20:00" }
+    }
+  },
+  {
+    "id": "u03",
+    "text": "Book a table for four on Friday at 8pm under Keyur.",
     "expect": {
       "tool": "book_table",
-      "args": {
-        "time": "19:00",
-        "guests": 2
-      }
+      "args": { "day": "Friday", "time": "20:00", "guests": 4, "name": "Keyur" },
+      "response_contains": ["confirmed", "Friday"]
     }
   }
 ]</code></pre>
       </div>
 
-      <div id="script-yaml" style="display: none;">
-        <pre><code>- id: u01
-  text: "Hello, is this the Saffron Leaf restaurant?"
+      <div class="tab-panel" id="script-yaml">
+        <pre>
+        <div class="pre-header">
+          <span class="filename"><svg><use href="#i-file"/></svg>script/utterances.yaml</span>
+          <button class="copy-pre" data-copy>Copy</button>
+        </div><code>- id: u01
+  text: "Hi, is this the Saffron Leaf restaurant?"
   expect:
-    response: "Saffron Leaf"
+    response_contains: ["Saffron Leaf"]
+
 - id: u02
-  text: "Can I book a table for tomorrow at seven pm?"
+  text: "Are you open this Friday at 8pm?"
+  expect:
+    tool: check_availability
+    args:
+      day: Friday
+      time: "20:00"
+
+- id: u03
+  text: "Book a table for four on Friday at 8pm under Keyur."
   expect:
     tool: book_table
     args:
-      time: "19:00"
-      guests: 2</code></pre>
+      day: Friday
+      time: "20:00"
+      guests: 4
+      name: Keyur
+    response_contains: ["confirmed", "Friday"]</code></pre>
       </div>
 
-      <h3>Expectation Parameters</h3>
-      <p>The <code>expect</code> block supports several keys for automated grading:</p>
+      <h3>Expectation keys</h3>
       <ul>
-        <li><code>response</code>: The substring expected to be present in the agent's textual response transcript.</li>
-        <li><code>tool</code>: The name of the function/tool the agent should invoke during this turn.</li>
-        <li><code>args</code>: A dictionary of key-value arguments that must match the tool call parameters. Arguments are evaluated using fuzzy matching to avoid strict type/spacing mismatch issues.</li>
-      </ul>
-
-      <h2>📊 Core Benchmarking Metrics</h2>
-      <p>VoxArena collects and calculates the following key metrics for each agent session:</p>
-      <ul>
-        <li><strong>Time-To-First-Audio (TTFA):</strong> The duration (in ms) from the moment the user's audio injection completes to the millisecond the first audio frame chunk is returned by the provider.</li>
-        <li><strong>Interruption Stop Latency:</strong> The speed (in ms) at which the provider halts speaking when the user injects a turn that interrupts active agent playback.</li>
-        <li><strong>Tool Call Accuracy:</strong> The ratio of correct tool invocations (name matches and argument payloads match expected fields) over total expected tool calls.</li>
-        <li><strong>Hallucinations:</strong> Verified using automated LLM grading (backed by <code>GEMINI_EVAL_MODEL</code> or <code>OPENAI_EVAL_MODEL</code>) that compares agent transcript statements against a static verified knowledge base.</li>
+        <li><code>tool</code> — the function the agent must call. A different (or no) tool fails the turn; <code>null</code> means no tool is allowed and any call counts as a hallucination.</li>
+        <li><code>args</code> — argument key/value pairs. Compared with case-insensitive, type-coercing matching so <code>"4"</code> matches <code>4</code> and <code>"friday"</code> matches <code>"Friday"</code>.</li>
+        <li><code>response_contains</code> — substrings that must appear in the transcript (case-insensitive). Useful for sanity-checking that the agent named the restaurant, confirmed the booking, etc.</li>
       </ul>
     </section>
 
-    <section id="cli-builder">
-      <h2>🛠️ Interactive CLI Command Builder</h2>
-      <p>Adjust the options below to configure your headless benchmark command, then copy the generated command line to run in your terminal or integrate into your GitHub Actions workflow.</p>
-      
-      <div class="builder-widget">
+    <section id="metrics">
+      <h2><svg class="anchor-icon"><use href="#i-bar-chart"/></svg>Metrics</h2>
+      <p>Each metric below is captured per turn and aggregated per run. All four can be wired into
+      CI as a threshold via the corresponding <code>--max-*</code> / <code>--min-*</code> flag.</p>
+
+      <div class="grid">
+        <div class="card">
+          <span class="card-icon"><svg><use href="#i-zap"/></svg></span>
+          <h3>Time to first audio</h3>
+          <p>Milliseconds from the end of the user's audio injection to the first audio frame emitted by the provider. Sub-second is usually felt as instant.</p>
+        </div>
+        <div class="card">
+          <span class="card-icon"><svg><use href="#i-gauge"/></svg></span>
+          <h3>Interruption stop latency</h3>
+          <p>How quickly the agent stops speaking after the user starts mid-response. Critical for natural turn-taking.</p>
+        </div>
+        <div class="card">
+          <span class="card-icon"><svg><use href="#i-wrench"/></svg></span>
+          <h3>Tool-call accuracy</h3>
+          <p>Fraction of turns where the agent called the expected tool with arguments that match the script's <code>expect.args</code> block.</p>
+        </div>
+        <div class="card">
+          <span class="card-icon"><svg><use href="#i-x"/></svg></span>
+          <h3>Hallucinations</h3>
+          <p>Count of tool calls the agent made when none was expected, plus optional LLM-graded fact violations against a known-good knowledge base.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="builder">
+      <h2><svg class="anchor-icon"><use href="#i-wrench"/></svg>CLI command builder</h2>
+      <p>Tune the knobs below to assemble a <code>voxarena</code> invocation you can paste into a shell or a CI job.</p>
+
+      <div class="builder">
         <div class="builder-grid">
-          <div class="form-group">
-            <label for="b-mode">Command Mode</label>
-            <select id="b-mode" onchange="updateCommand()">
-              <option value="run">run (Single Provider)</option>
-              <option value="compare">compare (Multi Provider)</option>
+          <div class="field">
+            <label for="b-mode">Mode</label>
+            <select id="b-mode">
+              <option value="run">run — single provider</option>
+              <option value="compare">compare — multiple providers</option>
             </select>
           </div>
-          
-          <div class="form-group" id="group-provider">
+          <div class="field" id="group-provider">
             <label for="b-provider">Provider</label>
-            <select id="b-provider" onchange="updateCommand()">
-              <option value="gemini">Google Gemini</option>
-              <option value="openai">OpenAI</option>
+            <select id="b-provider">
+              <option value="gemini">gemini</option>
+              <option value="openai">openai</option>
             </select>
           </div>
-
-          <div class="form-group">
-            <label for="b-transport">Transport Protocol</label>
-            <select id="b-transport" onchange="updateCommand()">
-              <option value="direct-injection">Direct Injection (Raw PCM)</option>
-              <option value="webrtc-local">WebRTC Local</option>
+          <div class="field" id="group-providers" style="display:none">
+            <label for="b-providers">Providers (comma-sep.)</label>
+            <input type="text" id="b-providers" value="gemini,openai" />
+          </div>
+          <div class="field">
+            <label for="b-transport">Transport</label>
+            <select id="b-transport">
+              <option value="direct-injection">direct-injection</option>
+              <option value="webrtc-local">webrtc-local</option>
             </select>
           </div>
-
-          <div class="form-group">
-            <label for="b-script">Script Path</label>
-            <input type="text" id="b-script" value="./script/utterances.json" oninput="updateCommand()">
+          <div class="field">
+            <label for="b-script">Script path</label>
+            <input type="text" id="b-script" value="./script/utterances.json" />
           </div>
-
-          <div class="form-group">
-            <label for="b-accuracy">Min Tool Accuracy <span class="label-val" id="val-accuracy">90%</span></label>
-            <input type="range" id="b-accuracy" min="0" max="1" step="0.05" value="0.9" oninput="updateAccuracy(this.value)">
+          <div class="field">
+            <label for="b-accuracy">Min tool accuracy <span class="field-hint" id="val-accuracy">0.90</span></label>
+            <input type="range" id="b-accuracy" min="0" max="1" step="0.05" value="0.9" />
           </div>
-
-          <div class="form-group">
-            <label for="b-ttfa">Max Avg TTFA (ms) <span class="label-val" id="val-ttfa">1800ms</span></label>
-            <input type="range" id="b-ttfa" min="500" max="5000" step="100" value="1800" oninput="updateTTFA(this.value)">
+          <div class="field">
+            <label for="b-ttfa">Max avg TTFA <span class="field-hint" id="val-ttfa">1800 ms</span></label>
+            <input type="range" id="b-ttfa" min="200" max="5000" step="100" value="1800" />
           </div>
-
-          <div class="form-group">
-            <label for="b-hallucinate">Max Hallucinations</label>
-            <input type="number" id="b-hallucinate" min="0" max="10" value="0" oninput="updateCommand()">
+          <div class="field">
+            <label for="b-hallucinate">Max hallucinations</label>
+            <input type="number" id="b-hallucinate" min="0" max="20" value="0" />
           </div>
-
-          <div class="form-group">
-            <label for="b-junit">JUnit Report XML Path</label>
-            <input type="text" id="b-junit" value="voxarena-junit.xml" oninput="updateCommand()">
+          <div class="field">
+            <label for="b-junit">JUnit output path <span class="field-hint">optional</span></label>
+            <input type="text" id="b-junit" value="voxarena-junit.xml" />
           </div>
         </div>
 
-        <div class="terminal-container">
-          <button class="copy-btn" onclick="copyCommand(this)">Copy</button>
-          <div id="cmd-preview">voxarena run --provider gemini --transport direct-injection --script ./script/utterances.json --min-tool-accuracy 0.9 --max-avg-ttfa-ms 1800 --max-hallucinations 0 --junit voxarena-junit.xml</div>
+        <div class="builder-output">
+          <button class="copy-pre" id="cmd-copy">Copy</button><span id="cmd-preview"></span>
         </div>
       </div>
     </section>
 
     <section id="extend">
-      <h2>🧩 Extensibility (Custom Pipecat Adapter)</h2>
-      <p>VoxArena is built on top of the <a href="https://github.com/pipecat-ai/pipecat" target="_blank" style="color: var(--primary-light);">Pipecat</a> framework. You can add new adapters or test custom LLM pipelines by implementing the adapter class interface.</p>
-      
-      <p>Create a class inheriting from <code>BaseProviderAdapter</code> and define the LLM service hook:</p>
-      <pre><code>from voxarena.providers.base import BaseProviderAdapter
+      <h2><svg class="anchor-icon"><use href="#i-puzzle"/></svg>Custom adapter</h2>
+      <p>
+        VoxArena adapters are thin wrappers around <a href="https://github.com/pipecat-ai/pipecat" target="_blank" rel="noopener">Pipecat</a> services. To
+        register a new provider — say a local LLM or a private endpoint — implement
+        <code>BaseProviderAdapter</code>, return a configured Pipecat service, and register the
+        class under a name.
+      </p>
 
-class CustomProviderAdapter(BaseProviderAdapter):
+      <pre>
+        <div class="pre-header">
+          <span class="filename"><svg><use href="#i-file"/></svg>voxarena/providers/my_provider.py</span>
+          <button class="copy-pre" data-copy>Copy</button>
+        </div><code>from voxarena.providers.base import BaseProviderAdapter
+from voxarena.providers import register_adapter
+
+class MyProviderAdapter(BaseProviderAdapter):
     def get_llm_service(self):
-        # Instantiate and return your custom Pipecat LLM Service
-        return MyCustomLLMService(
+        return MyPipecatLLMService(
             api_key=self.api_key,
-            model=self.model,
-            # ...
-        )</code></pre>
+            model=self.config.model,
+            tools=self.agent.tool_schemas,
+        )
+
+register_adapter("my-provider", MyProviderAdapter, api_key_env="MY_PROVIDER_API_KEY")</code></pre>
+
+      <p>Once registered, your provider is selectable everywhere — control panel dropdown, CLI
+      <code>--provider my-provider</code>, and <code>compare --providers gemini,openai,my-provider</code>.</p>
+
+      <div class="callout">
+        <svg><use href="#i-link"/></svg>
+        <div class="callout-body">
+          <strong>Read the source.</strong> The two reference adapters in
+          <code>voxarena/providers/gemini.py</code> and <code>voxarena/providers/openai.py</code>
+          are each ~40 lines — they are the best blueprint for a third.
+        </div>
+      </div>
     </section>
 
   </main>
+</div>
 
-  <script>
-    // Navigation highlighting
-    function setActive(el) {
-      document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
-      el.classList.add('active');
+<script>
+  // ---------- Theme ----------
+  const root = document.documentElement;
+  const themeToggle = document.getElementById('theme-toggle');
+  const themeIcon = document.getElementById('theme-icon');
+  const themeLabel = document.getElementById('theme-label');
+  const brandLogo = document.getElementById('brand-logo');
+
+  function applyTheme(t) {
+    root.setAttribute('data-theme', t);
+    if (t === 'light') {
+      themeIcon.innerHTML = '<use href="#i-moon"/>';
+      themeLabel.textContent = 'Dark';
+      brandLogo.src = 'logo.png';
+    } else {
+      themeIcon.innerHTML = '<use href="#i-sun"/>';
+      themeLabel.textContent = 'Light';
+      brandLogo.src = 'logo-dark.png';
     }
+    try { localStorage.setItem('voxarena-theme', t); } catch (e) {}
+  }
+  themeToggle.addEventListener('click', () => {
+    applyTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+  try {
+    const saved = localStorage.getItem('voxarena-theme');
+    if (saved) applyTheme(saved);
+    else applyTheme('dark');
+  } catch (e) { applyTheme('dark'); }
 
-    // Script Tab Switcher
-    function switchScriptTab(format) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      if (format === 'json') {
-        document.getElementById('script-json').style.display = 'block';
-        document.getElementById('script-yaml').style.display = 'none';
-        event.target.classList.add('active');
-      } else {
-        document.getElementById('script-json').style.display = 'none';
-        document.getElementById('script-yaml').style.display = 'block';
-        event.target.classList.add('active');
-      }
+  // ---------- Sidebar scroll-spy ----------
+  const navLinks = Array.from(document.querySelectorAll('[data-nav]'));
+  const sections = navLinks.map(a => document.querySelector(a.getAttribute('href')));
+
+  function spy() {
+    const y = window.scrollY + 120;
+    let active = sections[0];
+    for (const s of sections) {
+      if (s && s.offsetTop <= y) active = s;
     }
+    navLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + active.id));
+  }
+  window.addEventListener('scroll', spy, { passive: true });
+  spy();
 
-    // Theme Switcher
-    function toggleTheme() {
-      const html = document.documentElement;
-      const current = html.getAttribute('data-theme');
-      const next = current === 'dark' ? 'light' : 'dark';
-      html.setAttribute('data-theme', next);
+  // ---------- Tabs ----------
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetId = btn.dataset.tab;
+      const container = btn.closest('section');
+      container.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn));
+      container.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === targetId));
+    });
+  });
 
-      const icon = document.getElementById('theme-icon');
-      const text = document.getElementById('theme-text');
-      const logo = document.getElementById('logo-img');
+  // ---------- Copy buttons ----------
+  function copyText(btn, text) {
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    });
+  }
+  document.querySelectorAll('pre [data-copy]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const code = btn.closest('pre').querySelector('code').innerText;
+      copyText(btn, code);
+    });
+  });
 
-      if (next === 'light') {
-        icon.innerText = '🌙';
-        text.innerText = 'Dark Mode';
-        logo.src = 'logo.png';
-      } else {
-        icon.innerText = '☀️';
-        text.innerText = 'Light Mode';
-        logo.src = 'logo-dark.png';
-      }
+  // ---------- Command builder ----------
+  const $ = id => document.getElementById(id);
+  const fields = ['b-mode','b-provider','b-providers','b-transport','b-script','b-accuracy','b-ttfa','b-hallucinate','b-junit'];
+  fields.forEach(id => $(id) && $(id).addEventListener('input', updateCommand));
+
+  function updateCommand() {
+    const mode = $('b-mode').value;
+    $('group-provider').style.display  = mode === 'run' ? 'flex' : 'none';
+    $('group-providers').style.display = mode === 'compare' ? 'flex' : 'none';
+
+    $('val-accuracy').textContent = parseFloat($('b-accuracy').value).toFixed(2);
+    $('val-ttfa').textContent     = $('b-ttfa').value + ' ms';
+
+    const lines = ['voxarena ' + mode + ' \\'];
+    if (mode === 'run') {
+      lines.push('  --provider ' + $('b-provider').value + ' \\');
+    } else {
+      lines.push('  --providers ' + $('b-providers').value + ' \\');
     }
-
-    // Interactive Command Builder
-    function updateAccuracy(val) {
-      document.getElementById('val-accuracy').innerText = Math.round(val * 100) + '%';
-      updateCommand();
+    lines.push('  --transport ' + $('b-transport').value + ' \\');
+    if ($('b-script').value) lines.push('  --script ' + $('b-script').value + ' \\');
+    lines.push('  --min-tool-accuracy ' + $('b-accuracy').value + ' \\');
+    lines.push('  --max-avg-ttfa-ms ' + $('b-ttfa').value + ' \\');
+    let last = '  --max-hallucinations ' + $('b-hallucinate').value;
+    if ($('b-junit').value) {
+      lines.push(last + ' \\');
+      lines.push('  --junit ' + $('b-junit').value);
+    } else {
+      lines.push(last);
     }
-
-    function updateTTFA(val) {
-      document.getElementById('val-ttfa').innerText = val + 'ms';
-      updateCommand();
-    }
-
-    function updateCommand() {
-      const mode = document.getElementById('b-mode').value;
-      const provider = document.getElementById('b-provider').value;
-      const transport = document.getElementById('b-transport').value;
-      const script = document.getElementById('b-script').value;
-      const accuracy = document.getElementById('b-accuracy').value;
-      const ttfa = document.getElementById('b-ttfa').value;
-      const hallucinate = document.getElementById('b-hallucinate').value;
-      const junit = document.getElementById('b-junit').value;
-
-      const pGroup = document.getElementById('group-provider');
-      if (mode === 'compare') {
-        pGroup.style.display = 'none';
-      } else {
-        pGroup.style.display = 'flex';
-      }
-
-      let cmd = 'voxarena ';
-      if (mode === 'run') {
-        cmd += `run \\\n  --provider ${provider} \\\n`;
-      } else {
-        cmd += `compare \\\n`;
-      }
-
-      cmd += `  --transport ${transport} \\\n`;
-      if (script) cmd += `  --script ${script} \\\n`;
-      cmd += `  --min-tool-accuracy ${accuracy} \\\n`;
-      cmd += `  --max-avg-ttfa-ms ${ttfa} \\\n`;
-      cmd += `  --max-hallucinations ${hallucinate}`;
-      if (junit) cmd += ` \\\n  --junit ${junit}`;
-
-      document.getElementById('cmd-preview').innerText = cmd;
-    }
-
-    function copyCommand(btn) {
-      const text = document.getElementById('cmd-preview').innerText.replace(/\\\n/g, ' ');
-      navigator.clipboard.writeText(text).then(() => {
-        btn.innerText = 'Copied!';
-        btn.classList.add('copied');
-        setTimeout(() => {
-          btn.innerText = 'Copy';
-          btn.classList.remove('copied');
-        }, 2000);
-      });
-    }
-
-    // Set initial layout
-    updateCommand();
-  </script>
+    $('cmd-preview').textContent = lines.join('\n');
+  }
+  $('cmd-copy').addEventListener('click', () => {
+    copyText($('cmd-copy'), $('cmd-preview').textContent.replace(/\\\n\s*/g, ' '));
+  });
+  updateCommand();
+</script>
 </body>
 </html>
