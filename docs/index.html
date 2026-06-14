@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,12 +12,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
 
   <style>
-    :root {
+    :root[data-theme="dark"] {
       --bg: #000000;
       --surface: rgba(255, 255, 255, 0.03);
       --surface-hover: rgba(255, 255, 255, 0.07);
       --border: rgba(255, 255, 255, 0.09);
       --border-accent: rgba(255, 255, 255, 0.25);
+      --code-bg: rgba(255, 255, 255, 0.08);
+      --pre-bg: rgba(255, 255, 255, 0.02);
       
       --fg: #ffffff;
       --muted: rgba(255, 255, 255, 0.6);
@@ -30,9 +32,34 @@
       --accent-light: #ffffff;
       --error: #ff3355;
       
-      --font-sans: 'Inter', sans-serif;
-      --font-display: 'Outfit', sans-serif;
-      --font-mono: 'Fira Code', monospace;
+      --terminal-bg: rgba(0, 0, 0, 0.3);
+      --input-bg: rgba(255, 255, 255, 0.03);
+      --input-focus: rgba(255, 255, 255, 0.06);
+    }
+
+    :root[data-theme="light"] {
+      --bg: #ffffff;
+      --surface: rgba(0, 0, 0, 0.02);
+      --surface-hover: rgba(0, 0, 0, 0.05);
+      --border: rgba(0, 0, 0, 0.08);
+      --border-accent: rgba(0, 0, 0, 0.18);
+      --code-bg: rgba(0, 0, 0, 0.05);
+      --pre-bg: rgba(0, 0, 0, 0.015);
+      
+      --fg: #000000;
+      --muted: rgba(0, 0, 0, 0.6);
+      --muted-light: rgba(0, 0, 0, 0.35);
+      
+      --primary: #000000;
+      --primary-light: #000000;
+      --primary-dark: #333333;
+      --accent: #000000;
+      --accent-light: #000000;
+      --error: #dd1133;
+      
+      --terminal-bg: rgba(0, 0, 0, 0.03);
+      --input-bg: rgba(0, 0, 0, 0.02);
+      --input-focus: rgba(0, 0, 0, 0.04);
     }
 
     * {
@@ -49,6 +76,7 @@
       line-height: 1.7;
       overflow-x: hidden;
       display: flex;
+      transition: background-color 0.3s, color 0.3s;
     }
 
     /* Sidebar Navigation */
@@ -59,9 +87,7 @@
       top: 0;
       left: 0;
       border-right: 1px solid var(--border);
-      background-color: rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background-color: var(--bg);
       display: flex;
       flex-direction: column;
       padding: 24px;
@@ -75,24 +101,12 @@
       margin-bottom: 36px;
     }
 
-    .logo-icon {
-      font-size: 20px;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid var(--border);
-      width: 36px;
-      height: 36px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 8px;
-    }
-
     .logo-text {
       font-family: var(--font-display);
       font-size: 19px;
       font-weight: 700;
       letter-spacing: -0.5px;
-      color: #ffffff;
+      color: var(--fg);
     }
 
     .docs-pill {
@@ -101,9 +115,9 @@
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      background-color: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: #ffffff;
+      background-color: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--fg);
       padding: 2px 6px;
       border-radius: 12px;
       margin-left: 2px;
@@ -144,10 +158,38 @@
     }
 
     .nav-link.active {
-      background-color: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: #ffffff;
-      box-shadow: 0 4px 12px rgba(255, 255, 255, 0.02);
+      background-color: var(--surface-hover);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    }
+
+    .theme-switcher-container {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .theme-btn {
+      width: 100%;
+      background-color: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background-color 0.2s;
+    }
+
+    .theme-btn:hover {
+      background-color: var(--surface-hover);
     }
 
     /* Main Container */
@@ -174,7 +216,7 @@
       font-size: 38px;
       margin-bottom: 16px;
       font-weight: 800;
-      color: #ffffff;
+      color: var(--fg);
     }
 
     h2 {
@@ -183,7 +225,7 @@
       margin-bottom: 18px;
       border-bottom: 1px solid var(--border);
       padding-bottom: 10px;
-      color: #ffffff;
+      color: var(--fg);
       font-weight: 700;
     }
 
@@ -191,7 +233,7 @@
       font-size: 17px;
       margin-top: 24px;
       margin-bottom: 8px;
-      color: #ffffff;
+      color: var(--fg);
       font-weight: 600;
     }
 
@@ -202,19 +244,29 @@
       line-height: 1.7;
     }
 
+    ul, ol {
+      margin-left: 20px;
+      margin-bottom: 16px;
+      color: var(--muted);
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
     code {
       font-family: var(--font-mono);
-      background-color: rgba(255, 255, 255, 0.08);
+      background-color: var(--code-bg);
       padding: 2px 6px;
       border-radius: 4px;
       font-size: 0.9em;
-      color: #ffffff;
-      border: 1px solid rgba(255, 255, 255, 0.04);
+      color: var(--fg);
+      border: 1px solid var(--border);
     }
 
     pre {
       font-family: var(--font-mono);
-      background-color: rgba(255, 255, 255, 0.02);
+      background-color: var(--pre-bg);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 18px;
@@ -226,7 +278,7 @@
     pre code {
       background: none;
       padding: 0;
-      color: #e5e7eb;
+      color: var(--fg);
       font-size: 13px;
       line-height: 1.6;
       border: none;
@@ -243,14 +295,14 @@
     }
 
     .badge-primary {
-      background-color: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: #ffffff;
+      background-color: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--fg);
     }
 
     .badge-accent {
-      background-color: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background-color: var(--surface);
+      border: 1px solid var(--border);
       color: var(--muted);
     }
 
@@ -263,7 +315,7 @@
     }
 
     .card {
-      background-color: rgba(255, 255, 255, 0.02);
+      background-color: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 24px;
@@ -271,8 +323,8 @@
     }
 
     .card:hover {
-      border-color: rgba(255, 255, 255, 0.25);
-      background-color: rgba(255, 255, 255, 0.04);
+      border-color: var(--border-accent);
+      background-color: var(--surface-hover);
     }
 
     .card h3 {
@@ -282,8 +334,8 @@
 
     /* Info Alert Callouts */
     .alert-box {
-      background-color: rgba(255, 255, 255, 0.02);
-      border-left: 3px solid #ffffff;
+      background-color: var(--surface);
+      border-left: 3px solid var(--fg);
       border-radius: 0 6px 6px 0;
       padding: 16px 20px;
       margin: 24px 0;
@@ -294,12 +346,42 @@
 
     .alert-box p {
       margin-bottom: 0;
-      color: #e5e7eb;
+      color: var(--fg);
+    }
+
+    /* Tab Switcher for code blocks */
+    .tab-switcher {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 4px;
+      transition: color 0.2s, background-color 0.2s;
+    }
+
+    .tab-btn:hover {
+      color: var(--fg);
+    }
+
+    .tab-btn.active {
+      color: var(--fg);
+      background-color: var(--surface);
     }
 
     /* Interactive Command Builder */
     .builder-widget {
-      background: rgba(255, 255, 255, 0.02);
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 28px;
@@ -336,15 +418,15 @@
     }
 
     .label-val {
-      color: #ffffff;
+      color: var(--fg);
       opacity: 0.8;
     }
 
     select, input[type="text"], input[type="number"] {
-      background-color: rgba(255, 255, 255, 0.03);
+      background-color: var(--input-bg);
       border: 1px solid var(--border);
       border-radius: 6px;
-      color: #ffffff;
+      color: var(--fg);
       padding: 8px 12px;
       font-size: 14px;
       outline: none;
@@ -352,15 +434,15 @@
     }
 
     select:focus, input[type="text"]:focus, input[type="number"]:focus {
-      border-color: rgba(255, 255, 255, 0.4);
-      background-color: rgba(255, 255, 255, 0.06);
+      border-color: var(--border-accent);
+      background-color: var(--input-focus);
     }
 
     input[type="range"] {
       -webkit-appearance: none;
       width: 100%;
       height: 4px;
-      background: rgba(255, 255, 255, 0.1);
+      background: var(--border);
       border-radius: 2px;
       outline: none;
       margin: 10px 0;
@@ -372,20 +454,20 @@
       width: 16px;
       height: 16px;
       border-radius: 50%;
-      background: #ffffff;
+      background: var(--fg);
       cursor: pointer;
-      box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
     }
 
     .terminal-container {
-      background-color: rgba(0, 0, 0, 0.3);
+      background-color: var(--terminal-bg);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 16px 20px;
       position: relative;
       font-family: var(--font-mono);
       font-size: 13px;
-      color: #e5e7eb;
+      color: var(--fg);
       word-break: break-all;
       line-height: 1.6;
     }
@@ -394,9 +476,9 @@
       position: absolute;
       top: 12px;
       right: 12px;
-      background-color: rgba(255, 255, 255, 0.05);
+      background-color: var(--surface);
       border: 1px solid var(--border);
-      color: #ffffff;
+      color: var(--fg);
       border-radius: 4px;
       padding: 4px 10px;
       font-size: 11px;
@@ -408,14 +490,14 @@
     }
 
     .copy-btn:hover {
-      background-color: rgba(255, 255, 255, 0.12);
-      border-color: rgba(255, 255, 255, 0.3);
+      background-color: var(--surface-hover);
+      border-color: var(--border-accent);
     }
 
     .copy-btn.copied {
-      background-color: rgba(255, 255, 255, 0.2);
-      border-color: #ffffff;
-      color: #ffffff;
+      background-color: var(--surface-hover);
+      border-color: var(--fg);
+      color: var(--fg);
     }
 
     /* Responsive adjustments */
@@ -436,8 +518,7 @@
   <!-- Sidebar Nav -->
   <aside class="sidebar">
     <div class="logo-container">
-      <div class="logo-icon">🎙️</div>
-      <div class="logo-text">VoxArena</div>
+      <img id="logo-img" src="logo-dark.png" alt="VoxArena Logo" style="height: 28px; width: auto; object-fit: contain;" />
       <span class="docs-pill">docs</span>
     </div>
     <nav class="sidebar-nav">
@@ -455,6 +536,13 @@
       <div class="nav-title">Extension</div>
       <a href="#extend" class="nav-link" onclick="setActive(this)">Extend Adapter</a>
     </nav>
+
+    <!-- Theme Switcher -->
+    <div class="theme-switcher-container">
+      <button class="theme-btn" onclick="toggleTheme()">
+        <span id="theme-icon">☀️</span> <span id="theme-text">Light Mode</span>
+      </button>
+    </div>
   </aside>
 
   <!-- Content -->
@@ -504,31 +592,73 @@
     </section>
 
     <section id="cli">
-      <h2>⚙️ Headless CLI Engine</h2>
+      <h2>⚙️ Headless CLI Engine & Scripting</h2>
       <p>For regression testing, CI integration, or headless runners, the CLI consumes local scripts and exits with status <code>0</code> or <code>1</code> based on metrics thresholds.</p>
       
       <h3>Running a Script</h3>
       <pre><code>voxarena run --provider gemini --script ./script/utterances.json --min-tool-accuracy 0.95 --junit report.xml</code></pre>
       
-      <h3>JSON Script Format</h3>
-      <p>In CLI mode, conversation turns can be formatted as clean JSON files. Put this in your <code>script/utterances.json</code>:</p>
-      <pre><code>[
+      <h3>Conversation Script Format</h3>
+      <p>You can define conversation turns in either JSON or YAML format. In both modes, each turn specifies the phrase to say (or an audio WAV input matching the turn ID) and the expectations to check.</p>
+
+      <div class="tab-switcher">
+        <button class="tab-btn active" onclick="switchScriptTab('json')">JSON Format</button>
+        <button class="tab-btn" onclick="switchScriptTab('yaml')">YAML Format</button>
+      </div>
+
+      <div id="script-json">
+        <pre><code>[
   {
     "id": "u01",
-    "text": "Are you open on Sundays?",
+    "text": "Hello, is this the Saffron Leaf restaurant?",
     "expect": {
-      "tool": "get_hours",
-      "args": { "day": "sunday" }
+      "response": "Saffron Leaf"
     }
   },
   {
     "id": "u02",
-    "text": "Great, can I book a table?",
+    "text": "Can I book a table for tomorrow at seven pm?",
     "expect": {
-      "response": "book"
+      "tool": "book_table",
+      "args": {
+        "time": "19:00",
+        "guests": 2
+      }
     }
   }
 ]</code></pre>
+      </div>
+
+      <div id="script-yaml" style="display: none;">
+        <pre><code>- id: u01
+  text: "Hello, is this the Saffron Leaf restaurant?"
+  expect:
+    response: "Saffron Leaf"
+- id: u02
+  text: "Can I book a table for tomorrow at seven pm?"
+  expect:
+    tool: book_table
+    args:
+      time: "19:00"
+      guests: 2</code></pre>
+      </div>
+
+      <h3>Expectation Parameters</h3>
+      <p>The <code>expect</code> block supports several keys for automated grading:</p>
+      <ul>
+        <li><code>response</code>: The substring expected to be present in the agent's textual response transcript.</li>
+        <li><code>tool</code>: The name of the function/tool the agent should invoke during this turn.</li>
+        <li><code>args</code>: A dictionary of key-value arguments that must match the tool call parameters. Arguments are evaluated using fuzzy matching to avoid strict type/spacing mismatch issues.</li>
+      </ul>
+
+      <h2>📊 Core Benchmarking Metrics</h2>
+      <p>VoxArena collects and calculates the following key metrics for each agent session:</p>
+      <ul>
+        <li><strong>Time-To-First-Audio (TTFA):</strong> The duration (in ms) from the moment the user's audio injection completes to the millisecond the first audio frame chunk is returned by the provider.</li>
+        <li><strong>Interruption Stop Latency:</strong> The speed (in ms) at which the provider halts speaking when the user injects a turn that interrupts active agent playback.</li>
+        <li><strong>Tool Call Accuracy:</strong> The ratio of correct tool invocations (name matches and argument payloads match expected fields) over total expected tool calls.</li>
+        <li><strong>Hallucinations:</strong> Verified using automated LLM grading (backed by <code>GEMINI_EVAL_MODEL</code> or <code>OPENAI_EVAL_MODEL</code>) that compares agent transcript statements against a static verified knowledge base.</li>
+      </ul>
     </section>
 
     <section id="cli-builder">
@@ -620,13 +750,48 @@ class CustomProviderAdapter(BaseProviderAdapter):
       el.classList.add('active');
     }
 
+    // Script Tab Switcher
+    function switchScriptTab(format) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      if (format === 'json') {
+        document.getElementById('script-json').style.display = 'block';
+        document.getElementById('script-yaml').style.display = 'none';
+        event.target.classList.add('active');
+      } else {
+        document.getElementById('script-json').style.display = 'none';
+        document.getElementById('script-yaml').style.display = 'block';
+        event.target.classList.add('active');
+      }
+    }
+
+    // Theme Switcher
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+
+      const icon = document.getElementById('theme-icon');
+      const text = document.getElementById('theme-text');
+      const logo = document.getElementById('logo-img');
+
+      if (next === 'light') {
+        icon.innerText = '🌙';
+        text.innerText = 'Dark Mode';
+        logo.src = 'logo.png';
+      } else {
+        icon.innerText = '☀️';
+        text.innerText = 'Light Mode';
+        logo.src = 'logo-dark.png';
+      }
+    }
+
     // Interactive Command Builder
     function updateAccuracy(val) {
       document.getElementById('val-accuracy').innerText = Math.round(val * 100) + '%';
       updateCommand();
     }
 
-    // Interactive Command Builder
     function updateTTFA(val) {
       document.getElementById('val-ttfa').innerText = val + 'ms';
       updateCommand();
