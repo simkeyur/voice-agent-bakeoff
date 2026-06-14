@@ -23,6 +23,7 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
 
 from voxarena.agent import Agent
+from voxarena.audio_cache import resolve_audio
 from voxarena.config import ProviderConfig, settings
 from voxarena.database import load_utterances_from_db
 from voxarena.manifest import RunManifest, TurnMetric, AggregateMetrics
@@ -176,19 +177,6 @@ class EvaluationHarness:
         if hasattr(self, "adapter") and self.adapter and self.adapter.metrics_collector:
             self.adapter.metrics_collector.turn_completed_event.set()
 
-    def create_dummy_wav(self, file_path: str, duration_sec: float = 1.0):
-        """Create a silent WAV file for dry runs or when files are missing."""
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        sample_rate = 16000
-        num_frames = int(sample_rate * duration_sec)
-        silent_data = b"\x00\x00" * num_frames
-        with wave.open(file_path, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(silent_data)
-        logger.info(f"[Harness] Created dummy silent WAV at {file_path}")
-
     async def run_session(self, utterances: Optional[List[Dict[str, Any]]] = None, num_turns: Optional[int] = None):
         """Executes the test suite inside a single continuous Pipecat session.
 
@@ -212,11 +200,14 @@ class EvaluationHarness:
             utterances = utterances[:num_turns]
 
 
-        # Ensure audio files exist or create dummies for dry-run
-        for utt in utterances:
-            audio_path = os.path.join(settings.AUDIO_DIR, f"{utt['id']}.wav")
-            if not os.path.exists(audio_path):
-                self.create_dummy_wav(audio_path, duration_sec=1.5)
+        # Resolve audio for every utterance up front (hash-keyed cache; TTS
+        # synthesis on miss). Done before the pipeline starts so per-turn
+        # latency measurements aren't polluted by TTS time. Run in a thread
+        # so the synchronous TTS calls don't block the event loop.
+        async def _resolve_one(utt):
+            utt["_audio_path"] = await asyncio.to_thread(resolve_audio, utt["text"])
+
+        await asyncio.gather(*[_resolve_one(utt) for utt in utterances])
         
         # 2. Build Pipeline
         llm_service = self.adapter.get_llm_service()
@@ -293,7 +284,7 @@ class EvaluationHarness:
 
                 await self.manifest.save_progress_async(collector.current_turn)
 
-                audio_path = os.path.join(settings.AUDIO_DIR, f"{utt_id}.wav")
+                audio_path = utt["_audio_path"]
                 injection_task = asyncio.create_task(injector.inject_wav(audio_path))
 
                 try:
