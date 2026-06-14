@@ -405,6 +405,7 @@ function App() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [utterancesSaveMsg, setUtterancesSaveMsg] = useState('');
   const [resetMsg, setResetMsg] = useState('');
+  const [templates, setTemplates] = useState([]);
   
   // Detailed Run Inspection
   const [selectedRunId, setSelectedRunId] = useState(null);
@@ -527,6 +528,11 @@ function App() {
       .then((res) => res.json())
       .then((data) => setRuns(data))
       .catch((err) => console.error('Error fetching runs:', err));
+
+    fetch(`${backendUrl}/api/templates`)
+      .then((res) => res.json())
+      .then((data) => setTemplates(Array.isArray(data) ? data : []))
+      .catch((err) => console.error('Error fetching templates:', err));
   }, []);
 
   const [runningId, setRunningId] = useState(null);
@@ -840,6 +846,41 @@ function App() {
         setTimeout(() => setUtterancesSaveMsg(''), 3000);
       })
       .catch((err) => setUtterancesSaveMsg(`Error: ${err.message}`));
+  };
+
+  const handleLoadTemplate = (templateId) => {
+    if (settingsUtterances.length > 0 && !window.confirm('Loading a template will overwrite your current scripted utterances. Continue?')) {
+      return;
+    }
+    
+    setUtterancesSaveMsg('Loading template...');
+    fetch(`${backendUrl}/api/templates/${templateId}/load`, {
+      method: 'POST'
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load template');
+        return res.json();
+      })
+      .then((data) => {
+        // Refresh utterances state
+        fetch(`${backendUrl}/api/utterances/json`)
+          .then((res) => res.json())
+          .then((uttData) => {
+            const rawArgs = {};
+            if (Array.isArray(uttData)) {
+              uttData.forEach((u, idx) => {
+                rawArgs[idx] = u.expect?.args ? JSON.stringify(u.expect.args) : '';
+              });
+            }
+            setRawArgsState(rawArgs);
+            setSettingsUtterances(Array.isArray(uttData) ? uttData : []);
+            setUtterancesSaveMsg(`Loaded template successfully.`);
+            setTimeout(() => setUtterancesSaveMsg(''), 3000);
+          });
+      })
+      .catch((err) => {
+        setUtterancesSaveMsg(`Error loading template: ${err.message}`);
+      });
   };
 
   const updateUtteranceField = (index, field, value) => {
@@ -1820,24 +1861,114 @@ function App() {
             <div className="card" style={{ marginTop: 24 }}>
               <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span className="card-title">Scripted Test Utterances ({settingsUtterances.length})</span>
-                <button 
-                  className="btn btn-primary" 
-                  onClick={() => {
-                    const nextIndex = settingsUtterances.length;
-                    const nextId = `u${String(nextIndex + 1).padStart(2, '0')}`;
-                    setSettingsUtterances([...settingsUtterances, { id: nextId, text: '' }]);
-                    setRawArgsState((prev) => ({ ...prev, [nextIndex]: '' }));
-                  }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12 }}
-                >
-                  <Plus size={14} /> Add Utterance
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {templates.length > 0 && (
+                    <select
+                      className="select-input"
+                      value=""
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val) handleLoadTemplate(val);
+                      }}
+                      style={{ fontSize: 12, height: 28, padding: '2px 8px', width: 180, margin: 0 }}
+                    >
+                      <option value="" disabled>Load Template...</option>
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.turns_count} turns)
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={() => {
+                      const nextIndex = settingsUtterances.length;
+                      const nextId = `u${String(nextIndex + 1).padStart(2, '0')}`;
+                      setSettingsUtterances([...settingsUtterances, { id: nextId, text: '' }]);
+                      setRawArgsState((prev) => ({ ...prev, [nextIndex]: '' }));
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, height: 28 }}
+                  >
+                    <Plus size={14} /> Add Utterance
+                  </button>
+                </div>
               </div>
               <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {settingsUtterances.length === 0 ? (
-                  <p style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 13, padding: '20px 0' }}>
-                    No utterances configured. Click "Add Utterance" to get started.
-                  </p>
+                  <div className="onboarding-container" style={{
+                    padding: '30px 20px',
+                    textAlign: 'center',
+                    background: 'rgba(255, 255, 255, 0.01)',
+                    borderRadius: 12,
+                    border: '1px dashed var(--border)',
+                    margin: '10px 0'
+                  }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--fg)' }}>
+                      Get Started with a Benchmarking Template
+                    </h3>
+                    <p style={{ color: 'var(--muted)', fontSize: 13, maxWidth: 500, margin: '0 auto 24px auto', lineHeight: 1.5 }}>
+                      Select one of the built-in benchmark usecases to populate your test utterances, or start with a blank list.
+                    </p>
+                    
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                      gap: 16,
+                      marginBottom: 24,
+                      textAlign: 'left'
+                    }}>
+                      {templates.map((t) => (
+                        <div key={t.id} className="glass-card" style={{
+                          padding: 16,
+                          borderRadius: 10,
+                          border: '1px solid var(--border)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          background: 'rgba(255, 255, 255, 0.02)',
+                          transition: 'transform 0.2s, box-shadow 0.2s',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => handleLoadTemplate(t.id)}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                          e.currentTarget.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.2)';
+                          e.currentTarget.style.borderColor = 'var(--color-primary)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'none';
+                          e.currentTarget.style.boxShadow = 'none';
+                          e.currentTarget.style.borderColor = 'var(--border)';
+                        }}
+                        >
+                          <div>
+                            <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: 'var(--fg)' }}>{t.name}</h4>
+                            <p style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4, marginBottom: 12 }}>{t.description}</p>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-primary)' }}>{t.turns_count} Turns</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                              Load Usecase <ChevronRight size={12} />
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
+                      <button 
+                        className="btn" 
+                        onClick={() => {
+                          setSettingsUtterances([{ id: 'u01', text: '' }]);
+                          setRawArgsState({ 0: '' });
+                        }}
+                        style={{ fontSize: 12 }}
+                      >
+                        Start Blank Usecase
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   settingsUtterances.map((u, idx) => {
                     const expectType = u.expect?.tool ? 'tool' : u.expect?.response ? 'response' : 'none';

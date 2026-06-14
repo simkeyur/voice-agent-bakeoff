@@ -437,7 +437,7 @@ def save_utterances_to_db(utterances: List[Dict[str, Any]]) -> None:
 
 
 def bootstrap_utterances_if_empty() -> None:
-    """One-time seed of the utterances table from a default YAML script.
+    """One-time seed of the utterances table from a default YAML script or templates definition.
 
     Kept out of init_db so the disk read and YAML parse don't run inside schema
     setup (and don't block the FastAPI event loop during the lifespan hook).
@@ -448,6 +448,16 @@ def bootstrap_utterances_if_empty() -> None:
     if count > 0:
         return
 
+    # Try loading from built-in python templates first
+    try:
+        from voxarena.templates import TEMPLATES
+        save_utterances_to_db(TEMPLATES["restaurant"]["utterances"])
+        logger.info("Bootstrapped 5 default utterances (Restaurant) from python templates into SQLite.")
+        return
+    except Exception as e:
+        logger.warning(f"Failed to bootstrap utterances from python templates: {e}")
+
+    # Fallback to YAML script if python templates failed
     import yaml
     default_yaml = None
     script_yaml = os.path.join(settings.SCRIPT_DIR, "utterances.yaml")

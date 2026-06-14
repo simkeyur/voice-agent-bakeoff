@@ -105,6 +105,7 @@ async def health_check():
 
 
 @app.get("/api/status")
+@app.get("/api/config")
 async def get_status():
     """Check connectivity and loaded configuration."""
     providers = ["gemini", "openai"]
@@ -184,6 +185,46 @@ async def update_utterances_json(req: UtterancesJsonUpdateRequest):
         return {"status": "saved", "count": len(req.utterances)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save utterances: {e}")
+
+
+@app.get("/api/templates")
+async def get_templates():
+    """Retrieve metadata of all built-in benchmarking usecase templates."""
+    try:
+        from voxarena.templates import TEMPLATES
+        return [
+            {
+                "id": tid,
+                "name": tinfo["name"],
+                "description": tinfo["description"],
+                "turns_count": len(tinfo["utterances"]),
+            }
+            for tid, tinfo in TEMPLATES.items()
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get templates: {e}")
+
+
+@app.post("/api/templates/{template_id}/load")
+async def load_template(template_id: str):
+    """Overwrite SQLite utterances with turns from the specified built-in template."""
+    try:
+        from voxarena.templates import TEMPLATES
+        if template_id not in TEMPLATES:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Template '{template_id}' not found. Available: {list(TEMPLATES.keys())}",
+            )
+        save_utterances_to_db(TEMPLATES[template_id]["utterances"])
+        return {
+            "status": "loaded",
+            "template_id": template_id,
+            "count": len(TEMPLATES[template_id]["utterances"]),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load template: {e}")
 
 
 @app.get("/api/runs", response_model=List[Dict[str, Any]])
