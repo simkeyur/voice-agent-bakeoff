@@ -20,7 +20,7 @@ VoxArena is a reproducible benchmarking harness for realtime voice agents. Run t
 
 Drop it into your CI pipeline, your dev loop, or the bundled control panel.
 
-📚 **Interactive Documentation Guide:** A visual dashboard guide with an interactive CLI command builder is located in the [docs/](docs/index.html) directory (hostable on GitHub Pages).
+📚 **Documentation:** Full guide with flow diagrams, realistic samples, and an interactive CLI command builder at **[simkeyur.github.io/vox-arena](https://simkeyur.github.io/vox-arena/#quickstart)**.
 
 ---
 
