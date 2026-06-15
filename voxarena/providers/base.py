@@ -209,6 +209,17 @@ class BaseProviderAdapter:
         raise NotImplementedError("Subclasses must implement get_llm_service")
 
     def register_tools(self, service: Any) -> None:
-        """Wire every agent tool into the Pipecat service using the shared callback."""
+        """Wire every agent tool into the Pipecat service using a template-aware callback."""
+        async def tool_callback(params: FunctionCallParams) -> None:
+            name = params.function_name
+            args = params.arguments
+            logger.info(f"[Tool] {name}({args}) using template {self.agent.template_id}")
+            try:
+                result_str = execute_tool(name, args, template_id=self.agent.template_id)
+                await params.result_callback({"result": result_str})
+            except Exception as e:
+                logger.error(f"[Tool] Error in {name}: {e}")
+                await params.result_callback({"error": str(e)})
+
         for schema in self.agent.tool_schemas:
-            service.register_function(schema["name"], shared_tool_callback)
+            service.register_function(schema["name"], tool_callback)

@@ -33,15 +33,29 @@ class Agent:
         prompt_version: str = "v1.0",
         tool_schema_version: str = "v1.0",
         data_dir: Optional[str] = None,
+        template_id: Optional[str] = None,
     ):
         self.prompt_version = prompt_version
         self.tool_schema_version = tool_schema_version
         self.data_dir = data_dir or DEFAULT_DATA_DIR
 
-        self.prompt_path = os.path.join(self.data_dir, "system_prompt.txt")
-        self.system_prompt = self._load_system_prompt()
+        # Resolve active template ID
+        self.template_id = template_id
+        if self.template_id is None:
+            from voxarena.config import get_setting
+            self.template_id = get_setting("ACTIVE_TEMPLATE") or "restaurant"
+            if self.template_id == "custom":
+                self.template_id = get_setting("LAST_LOADED_TEMPLATE") or "restaurant"
 
-        self.tool_schemas = TOOL_SCHEMAS
+        from voxarena.templates import TEMPLATES
+        if self.template_id in TEMPLATES:
+            tpl = TEMPLATES[self.template_id]
+            self.system_prompt = tpl["system_prompt"]
+            self.tool_schemas = tpl["tools"]
+        else:
+            self.prompt_path = os.path.join(self.data_dir, "system_prompt.txt")
+            self.system_prompt = self._load_system_prompt()
+            self.tool_schemas = TOOL_SCHEMAS
 
         self.prompt_hash = self._sha256(self.system_prompt)
         self.tool_schema_hash = self._sha256(json.dumps(self.tool_schemas, sort_keys=True))

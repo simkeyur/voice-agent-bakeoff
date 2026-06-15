@@ -281,6 +281,7 @@ async def load_template(template_id: str):
             )
         save_utterances_to_db(TEMPLATES[template_id]["utterances"])
         set_setting("ACTIVE_TEMPLATE", template_id)
+        set_setting("LAST_LOADED_TEMPLATE", template_id)
         return {
             "status": "loaded",
             "template_id": template_id,

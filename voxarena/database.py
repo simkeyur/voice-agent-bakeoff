@@ -460,6 +460,9 @@ def bootstrap_utterances_if_empty() -> None:
     try:
         from voxarena.templates import TEMPLATES
         save_utterances_to_db(TEMPLATES["restaurant"]["utterances"])
+        from voxarena.config import set_setting
+        set_setting("ACTIVE_TEMPLATE", "restaurant")
+        set_setting("LAST_LOADED_TEMPLATE", "restaurant")
         logger.info("Bootstrapped 5 default utterances (Restaurant) from python templates into SQLite.")
         return
     except Exception as e:

@@ -160,8 +160,24 @@ TOOL_FUNCTION_MAP = {
     "check_reservation_availability": check_reservation_availability
 }
 
-def execute_tool(name: str, arguments: Dict[str, Any]) -> str:
+def execute_tool(name: str, arguments: Dict[str, Any], template_id: Optional[str] = None) -> str:
     """Helper to execute a tool by name with arguments dict."""
+    if template_id is None:
+        from voxarena.config import get_setting
+        template_id = get_setting("ACTIVE_TEMPLATE") or "restaurant"
+        if template_id == "custom":
+            template_id = get_setting("LAST_LOADED_TEMPLATE") or "restaurant"
+
+    if template_id == "telecom":
+        from voxarena.templates import mock_execute_telecom
+        return mock_execute_telecom(name, arguments)
+    elif template_id == "smarthome":
+        from voxarena.templates import mock_execute_smarthome
+        return mock_execute_smarthome(name, arguments)
+    elif template_id == "finance":
+        from voxarena.templates import mock_execute_finance
+        return mock_execute_finance(name, arguments)
+
     if name not in TOOL_FUNCTION_MAP:
         return f"Tool '{name}' is not a valid tool."
     try:

@@ -1354,10 +1354,10 @@ jobs:
   },
   {
     "id": "u03",
-    "text": "Book a table for four on Friday at 8pm under Keyur.",
+    "text": "Book a table for four on Friday at 8pm under Alex.",
     "expect": {
       "tool": "book_table",
-      "args": { "day": "Friday", "time": "20:00", "guests": 4, "name": "Keyur" },
+      "args": { "day": "Friday", "time": "20:00", "guests": 4, "name": "Alex" },
       "response_contains": ["confirmed", "Friday"]
     }
   }
@@ -1383,14 +1383,14 @@ jobs:
       time: "20:00"
 
 - id: u03
-  text: "Book a table for four on Friday at 8pm under Keyur."
+  text: "Book a table for four on Friday at 8pm under Alex."
   expect:
     tool: book_table
     args:
       day: Friday
       time: "20:00"
       guests: 4
-      name: Keyur
+      name: Alex
     response_contains: ["confirmed", "Friday"]</code></pre>
       </div>
 
