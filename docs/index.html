@@ -932,6 +932,80 @@
       background: var(--fg);
       transform: scale(1.25);
     }
+
+    /* Carousel Maximize option */
+    .carousel-maximize-btn {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(10, 14, 20, 0.7);
+      backdrop-filter: blur(4px);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      width: 38px;
+      height: 38px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, transform 0.2s, color 0.2s;
+      z-index: 12;
+      outline: none;
+    }
+    .carousel-maximize-btn:hover {
+      background: var(--fg);
+      color: var(--bg);
+      transform: scale(1.05);
+      border-color: transparent;
+    }
+    .carousel-maximize-btn svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+    }
+    .screenshot-carousel.maximized .carousel-maximize-btn .maximize-icon {
+      display: none;
+    }
+    .screenshot-carousel.maximized .carousel-maximize-btn .minimize-icon {
+      display: block !important;
+    }
+    .screenshot-carousel.maximized {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 9999;
+      background: rgba(10, 14, 20, 0.98);
+      backdrop-filter: blur(16px);
+      margin: 0;
+      border: none;
+      border-radius: 0;
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      box-sizing: border-box;
+    }
+    .screenshot-carousel.maximized .carousel-container {
+      max-height: 85vh;
+      border-radius: 12px;
+      flex-grow: 1;
+      width: 100%;
+      max-width: 1200px;
+      display: flex;
+      flex-direction: column;
+    }
+    .screenshot-carousel.maximized .carousel-track {
+      flex-grow: 1;
+      height: 100%;
+      padding-bottom: 0; /* Override the 16:9 ratio to fill available space */
+    }
+    .screenshot-carousel.maximized .carousel-slide img {
+      object-fit: contain;
+    }
   </style>
 </head>
 <body>
@@ -1209,6 +1283,10 @@
             </div>
           </div>
           
+          <button class="carousel-maximize-btn" aria-label="Toggle full size">
+            <svg class="maximize-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            <svg class="minimize-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M4 14h6v6m10-6h-6v6M4 10h6V4m10 6h-6V4"/></svg>
+          </button>
           <button class="carousel-btn prev" aria-label="Previous screenshot">❬</button>
           <button class="carousel-btn next" aria-label="Next screenshot">❭</button>
         </div>
@@ -1886,6 +1964,28 @@ register_adapter("my-provider", MyProviderAdapter, api_key_env="MY_PROVIDER_API_
       carouselEl.addEventListener('mouseenter', stopAutoplay);
       carouselEl.addEventListener('mouseleave', startAutoplay);
     }
+  }
+
+  // Maximize button click & Escape key listener
+  const maximizeBtn = document.querySelector('.carousel-maximize-btn');
+  const carouselEl = document.querySelector('.screenshot-carousel');
+  
+  if (maximizeBtn && carouselEl) {
+    maximizeBtn.addEventListener('click', () => {
+      const isMax = carouselEl.classList.toggle('maximized');
+      if (isMax) {
+        document.body.style.overflow = 'hidden'; // Lock background scrolling
+      } else {
+        document.body.style.overflow = '';
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && carouselEl.classList.contains('maximized')) {
+        carouselEl.classList.remove('maximized');
+        document.body.style.overflow = '';
+      }
+    });
   }
 </script>
 </body>
