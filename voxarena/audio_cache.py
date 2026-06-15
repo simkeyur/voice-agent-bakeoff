@@ -74,6 +74,35 @@ def _write_silent_wav(path: str, duration_sec: float = 1.5) -> None:
         wf.writeframes(silent_data)
 
 
+def prune_orphan_synth_files(keep_texts: list[str]) -> int:
+    """Delete synthesized WAV files in AUDIO_DIR/synth/ that don't match any
+    currently-known utterance text. Returns the number of files removed.
+
+    Called on bootstrap so the synth cache doesn't grow without bound as
+    templates / utterances evolve.
+    """
+    cache_dir = os.path.join(settings.AUDIO_DIR, CACHE_SUBDIR)
+    if not os.path.isdir(cache_dir):
+        return 0
+
+    keep = {os.path.basename(_cache_path(t)) for t in keep_texts if t and t.strip()}
+    keep.add(os.path.basename(_cache_path("__silent__")))
+
+    removed = 0
+    for name in os.listdir(cache_dir):
+        if not name.endswith(".wav"):
+            continue
+        if name not in keep:
+            try:
+                os.remove(os.path.join(cache_dir, name))
+                removed += 1
+            except OSError as e:
+                logger.warning(f"Failed to prune orphan synth file {name}: {e}")
+    if removed:
+        logger.info(f"Pruned {removed} orphan synth WAV file(s) from {cache_dir}.")
+    return removed
+
+
 def resolve_audio(text: str) -> str:
     """Return a path to a WAV file matching ``text``, synthesizing it if needed.
 

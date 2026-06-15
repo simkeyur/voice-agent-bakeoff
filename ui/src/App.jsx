@@ -631,17 +631,25 @@ function App() {
   };
 
   const pollCompareStatus = (geminiRunId, openaiRunId) => {
+    // Snapshot the run-id pair this poll is for; if the user navigates away
+    // (activeComparison changes or compareRunIds is cleared) we stop polling.
+    const pairKey = `${geminiRunId}::${openaiRunId}`;
     Promise.all([
       fetch(`${backendUrl}/api/runs/${geminiRunId}`).then((res) => res.json()),
       fetch(`${backendUrl}/api/runs/${openaiRunId}`).then((res) => res.json())
     ])
       .then(([geminiData, openaiData]) => {
+        const active = activeComparisonRef.current;
+        const stillOnSamePair =
+          active &&
+          active.run1.run_id === geminiRunId &&
+          active.run2.run_id === openaiRunId;
+
         const isDone = (d) => d.status === 'completed' || d.status === 'failed';
         const summarize = (label, d) => `${label}: ${d.status?.toUpperCase()} (turns: ${d.turns ? d.turns.length : 0})`;
         addLog(`${summarize('Gemini', geminiData)} | ${summarize('OpenAI', openaiData)}`);
 
-        if (activeComparisonRef.current && 
-            (activeComparisonRef.current.run1.run_id === geminiRunId && activeComparisonRef.current.run2.run_id === openaiRunId)) {
+        if (stillOnSamePair) {
           setActiveComparison({ run1: geminiData, run2: openaiData });
         }
 
@@ -652,8 +660,11 @@ function App() {
           fetch(`${backendUrl}/api/runs`)
             .then((res) => res.json())
             .then((d) => setRuns(d));
-        } else {
+        } else if (stillOnSamePair) {
+          // Only re-arm the poll if the user is still on this comparison.
           setTimeout(() => pollCompareStatus(geminiRunId, openaiRunId), 2000);
+        } else {
+          addLog(`Stopped polling ${pairKey} (user navigated away).`);
         }
       })
       .catch((err) => {
@@ -1352,12 +1363,133 @@ function App() {
                 </div>
               </div>
             ) : activeComparison ? (
-              // Side-by-side Comparison View
+              // Side-by-side Comparison View — subtle redesign:
+              //  - dynamic provider labels (no hardcoded GEMINI / OPENAI)
+              //  - winner highlight on metrics instead of colored borders
+              //  - status pill alone (no 3px colored border per turn)
+              //  - collapsible Live Logs panel
+              (() => {
+                const r1 = activeComparison.run1;
+                const r2 = activeComparison.run2;
+                const m1 = r1.metrics || {};
+                const m2 = r2.metrics || {};
+
+                // Lower TTFA wins. Higher accuracy wins. Lower hallucinations win.
+                const ttfaWinner = (m1.average_ttfa_ms != null && m2.average_ttfa_ms != null)
+                  ? (m1.average_ttfa_ms < m2.average_ttfa_ms ? r1.run_id : (m2.average_ttfa_ms < m1.average_ttfa_ms ? r2.run_id : null))
+                  : null;
+                const accWinner = (m1.tool_call_accuracy_rate != null && m2.tool_call_accuracy_rate != null)
+                  ? (m1.tool_call_accuracy_rate > m2.tool_call_accuracy_rate ? r1.run_id : (m2.tool_call_accuracy_rate > m1.tool_call_accuracy_rate ? r2.run_id : null))
+                  : null;
+                const hallWinner = ((m1.hallucination_count ?? 0) < (m2.hallucination_count ?? 0))
+                  ? r1.run_id
+                  : ((m2.hallucination_count ?? 0) < (m1.hallucination_count ?? 0) ? r2.run_id : null);
+
+                const ttfaDelta = (m1.average_ttfa_ms != null && m2.average_ttfa_ms != null)
+                  ? Math.abs(m1.average_ttfa_ms - m2.average_ttfa_ms).toFixed(0)
+                  : null;
+
+                const Metric = ({ label, value, isWinner, tone, delta }) => {
+                  const color = tone === 'error' ? 'var(--error)' : (isWinner ? 'var(--fg)' : 'var(--muted)');
+                  return (
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+                        <span style={{ fontWeight: isWinner ? 700 : 500, fontSize: 16, fontFamily: 'var(--font-mono)', color }}>
+                          {value}
+                        </span>
+                        {delta && (
+                          <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{delta}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                };
+
+                const SummaryCard = ({ run, winners }) => {
+                  const m = run.metrics || {};
+                  const isTtfaW = winners.ttfa === run.run_id;
+                  const isAccW = winners.acc === run.run_id;
+                  const isHallW = winners.hall === run.run_id;
+                  return (
+                    <div className="comparison-card">
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: 'var(--fg)' }}>
+                          {(run.provider || '').toUpperCase()}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--muted)' }}>{run.model}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{run.run_id}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 10 }}>
+                        <Metric
+                          label="Avg TTFA"
+                          value={m.average_ttfa_ms != null ? `${m.average_ttfa_ms.toFixed(0)} ms` : '—'}
+                          isWinner={isTtfaW}
+                          delta={!isTtfaW && winners.ttfaDelta ? `+${winners.ttfaDelta}ms` : null}
+                        />
+                        <Metric
+                          label="Tool Accuracy"
+                          value={m.tool_call_accuracy_rate != null ? `${(m.tool_call_accuracy_rate * 100).toFixed(0)}%` : '—'}
+                          isWinner={isAccW}
+                        />
+                        <Metric
+                          label="Hallucinations"
+                          value={m.hallucination_count ?? 0}
+                          isWinner={isHallW}
+                          tone={(m.hallucination_count ?? 0) > 0 ? 'error' : null}
+                        />
+                      </div>
+                    </div>
+                  );
+                };
+
+                const winners = { ttfa: ttfaWinner, acc: accWinner, hall: hallWinner, ttfaDelta };
+
+                const TurnCell = ({ run, turn }) => {
+                  const passed = !!turn.transcript_output && turn.evaluation_passed !== false;
+                  return (
+                    <div className="comparison-card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: 'var(--muted)' }}>
+                          {(run.provider || '').toUpperCase()}
+                        </span>
+                        <span className={`status-badge ${passed ? 'completed' : 'failed'}`}>{passed ? 'PASS' : 'FAIL'}</span>
+                      </div>
+                      <div style={{ fontSize: 13, margin: '8px 0', minHeight: 40 }}>
+                        {turn.transcript_output || (
+                          <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>(No speech output returned)</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px dashed var(--border)', paddingTop: 6 }}>
+                        <div>TTFA <strong>{turn.time_to_first_audio_ms ? `${turn.time_to_first_audio_ms.toFixed(0)}ms` : '—'}</strong></div>
+                        <div>Int Stop <strong>{turn.interruption_stop_latency_ms ? `${turn.interruption_stop_latency_ms.toFixed(0)}ms` : '—'}</strong></div>
+                        <div>Tool <strong>{turn.tool_call_details ? turn.tool_call_details.name : '—'}</strong></div>
+                      </div>
+                      {turn.audio_output_path && (
+                        <div style={{ marginTop: 8 }}>
+                          <AudioPlayer
+                            src={`/api/results/${run.provider}/${run.run_id}/${turn.utterance_id}_response.wav`}
+                            latencyMs={turn.time_to_first_audio_ms}
+                          />
+                        </div>
+                      )}
+                      {turn.evaluation_notes && (
+                        <div style={{ fontSize: 11, color: 'var(--muted)', background: 'rgba(0,0,0,0.05)', padding: '6px 10px', borderRadius: 6, marginTop: 6 }}>
+                          {turn.evaluation_notes}
+                        </div>
+                      )}
+                    </div>
+                  );
+                };
+
+                const showLiveLogs = !!compareRunIds || r1.status === 'running' || r2.status === 'running';
+
+                return (
               <div className="card">
                 <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <button 
-                      className="btn-icon" 
+                    <button
+                      className="btn-icon"
                       onClick={() => { window.location.hash = '#/runs'; }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg)', padding: 4, display: 'flex', alignItems: 'center' }}
                       title="Back to Runs"
@@ -1371,157 +1503,47 @@ function App() {
                   </div>
                 </div>
                 <div className="card-body">
-                  {/* Split Summary */}
                   <div className="compare-split-view">
-                    <div className="comparison-card" style={{ borderLeft: '4px solid var(--color-primary)' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-primary)', letterSpacing: '0.05em' }}>RUN 1 (GEMINI)</div>
-                      <div style={{ fontSize: 15, fontWeight: 600, marginTop: 4 }}>{activeComparison.run1.model}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>ID: {activeComparison.run1.run_id}</div>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Avg TTFA</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>
-                            {activeComparison.run1.metrics?.average_ttfa_ms ? `${activeComparison.run1.metrics.average_ttfa_ms.toFixed(0)} ms` : '--'}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Tool Accuracy</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>
-                            {activeComparison.run1.metrics?.tool_call_accuracy_rate != null ? `${(activeComparison.run1.metrics.tool_call_accuracy_rate * 100).toFixed(0)}%` : '--'}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Hallucinations</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: activeComparison.run1.metrics?.hallucination_count > 0 ? 'var(--error)' : 'var(--fg)' }}>
-                            {activeComparison.run1.metrics?.hallucination_count ?? 0}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="comparison-card" style={{ borderLeft: '4px solid var(--color-secondary)' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-secondary)', letterSpacing: '0.05em' }}>RUN 2 (OPENAI)</div>
-                      <div style={{ fontSize: 15, fontWeight: 600, marginTop: 4 }}>{activeComparison.run2.model}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>ID: {activeComparison.run2.run_id}</div>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Avg TTFA</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>
-                            {activeComparison.run2.metrics?.average_ttfa_ms ? `${activeComparison.run2.metrics.average_ttfa_ms.toFixed(0)} ms` : '--'}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Tool Accuracy</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>
-                            {activeComparison.run2.metrics?.tool_call_accuracy_rate != null ? `${(activeComparison.run2.metrics.tool_call_accuracy_rate * 100).toFixed(0)}%` : '--'}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Hallucinations</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: activeComparison.run2.metrics?.hallucination_count > 0 ? 'var(--error)' : 'var(--fg)' }}>
-                            {activeComparison.run2.metrics?.hallucination_count ?? 0}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    <SummaryCard run={r1} winners={winners} />
+                    <SummaryCard run={r2} winners={winners} />
                   </div>
 
-                  {/* Live comparison logs if active */}
-                  {(compareRunIds || activeComparison.run1.status === 'running' || activeComparison.run2.status === 'running') && (
-                    <div className="card" style={{ marginTop: 16 }}>
-                      <div className="card-header">
-                        <span className="card-title">Live Comparison Logs</span>
+                  {/* Live logs — collapsible so they don't dominate the page when not actively streaming. */}
+                  {showLiveLogs && (
+                    <details open={showLiveLogs && !!compareRunIds} style={{ marginTop: 16, border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px' }}>
+                      <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
+                        Live Comparison Logs
+                      </summary>
+                      <div className="terminal" style={{ marginTop: 8, height: 200 }}>
+                        {logs.map((log, idx) => (
+                          <div className="terminal-line" key={idx}>
+                            <span className="terminal-timestamp">[{log.time}]</span>
+                            <span>{log.text}</span>
+                          </div>
+                        ))}
+                        <div ref={logsEndRef} />
                       </div>
-                      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', height: '200px' }}>
-                        <div className="terminal" style={{ flex: 1 }}>
-                          {logs.map((log, idx) => (
-                            <div className="terminal-line" key={idx}>
-                              <span className="terminal-timestamp">[{log.time}]</span>
-                              <span>{log.text}</span>
-                            </div>
-                          ))}
-                          <div ref={logsEndRef} />
-                        </div>
-                      </div>
-                    </div>
+                    </details>
                   )}
 
-                  {/* Side-by-Side Turn list */}
                   <div style={{ marginTop: 20 }}>
                     <h3 style={{ fontSize: 13, fontWeight: 600, borderBottom: '1px solid var(--border)', paddingBottom: 6, marginBottom: 12 }}>
                       Turn Comparison
                     </h3>
-                    
-                    {activeComparison.run1.turns.map((turn1, index) => {
-                      const turn2 = activeComparison.run2.turns[index] || {};
-                      const passed1 = !!turn1.transcript_output && turn1.evaluation_passed !== false;
-                      const passed2 = !!turn2.transcript_output && turn2.evaluation_passed !== false;
-                      
+
+                    {r1.turns.map((turn1, index) => {
+                      const turn2 = r2.turns[index] || {};
+
                       return (
                         <div key={index} style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 16 }}>
                           <div style={{ marginBottom: 8 }}>
                             <span className="header-badge">TURN {turn1.utterance_id}</span>
                             <span style={{ fontSize: 12, marginLeft: 8, color: 'var(--muted)' }}>Prompt: "{turn1.text_input}"</span>
                           </div>
-                          
-                          <div className="compare-split-view" style={{ marginTop: 6 }}>
-                            <div className="comparison-card" style={{ borderLeft: `3px solid ${passed1 ? 'var(--success)' : 'var(--error)'}` }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-primary)' }}>GEMINI</span>
-                                <span className={`status-badge ${passed1 ? 'completed' : 'failed'}`}>{passed1 ? 'PASS' : 'FAIL'}</span>
-                              </div>
-                              <div style={{ fontSize: 13, margin: '8px 0', minHeight: 40 }}>
-                                {turn1.transcript_output || <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>(No speech output returned)</span>}
-                              </div>
-                              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px dashed var(--border)', paddingTop: 6 }}>
-                                <div>TTFA: <strong>{turn1.time_to_first_audio_ms ? `${turn1.time_to_first_audio_ms.toFixed(0)}ms` : '—'}</strong></div>
-                                <div>Int Stop: <strong>{turn1.interruption_stop_latency_ms ? `${turn1.interruption_stop_latency_ms.toFixed(0)}ms` : '—'}</strong></div>
-                                <div>Tool: <strong>{turn1.tool_call_details ? turn1.tool_call_details.name : '—'}</strong></div>
-                              </div>
-                              {turn1.audio_output_path && (
-                                <div style={{ marginTop: 8 }}>
-                                  <AudioPlayer
-                                    src={`/api/results/${activeComparison.run1.provider}/${activeComparison.run1.run_id}/${turn1.utterance_id}_response.wav`}
-                                    latencyMs={turn1.time_to_first_audio_ms}
-                                  />
-                                </div>
-                              )}
-                              {turn1.evaluation_notes && (
-                                <div style={{ fontSize: 11, color: 'var(--muted)', background: 'rgba(0,0,0,0.05)', padding: '6px 10px', borderRadius: 6, marginTop: 6 }}>
-                                  {turn1.evaluation_notes}
-                                </div>
-                              )}
-                            </div>
 
-                            <div className="comparison-card" style={{ borderLeft: `3px solid ${passed2 ? 'var(--success)' : 'var(--error)'}` }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-secondary)' }}>OPENAI</span>
-                                <span className={`status-badge ${passed2 ? 'completed' : 'failed'}`}>{passed2 ? 'PASS' : 'FAIL'}</span>
-                              </div>
-                              <div style={{ fontSize: 13, margin: '8px 0', minHeight: 40 }}>
-                                {turn2.transcript_output || <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>(No speech output returned)</span>}
-                              </div>
-                              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px dashed var(--border)', paddingTop: 6 }}>
-                                <div>TTFA: <strong>{turn2.time_to_first_audio_ms ? `${turn2.time_to_first_audio_ms.toFixed(0)}ms` : '—'}</strong></div>
-                                <div>Int Stop: <strong>{turn2.interruption_stop_latency_ms ? `${turn2.interruption_stop_latency_ms.toFixed(0)}ms` : '—'}</strong></div>
-                                <div>Tool: <strong>{turn2.tool_call_details ? turn2.tool_call_details.name : '—'}</strong></div>
-                              </div>
-                              {turn2.audio_output_path && (
-                                <div style={{ marginTop: 8 }}>
-                                  <AudioPlayer
-                                    src={`/api/results/${activeComparison.run2.provider}/${activeComparison.run2.run_id}/${turn2.utterance_id}_response.wav`}
-                                    latencyMs={turn2.time_to_first_audio_ms}
-                                  />
-                                </div>
-                              )}
-                              {turn2.evaluation_notes && (
-                                <div style={{ fontSize: 11, color: 'var(--muted)', background: 'rgba(0,0,0,0.05)', padding: '6px 10px', borderRadius: 6, marginTop: 6 }}>
-                                  {turn2.evaluation_notes}
-                                </div>
-                              )}
-                            </div>
+                          <div className="compare-split-view" style={{ marginTop: 6 }}>
+                            <TurnCell run={r1} turn={turn1} />
+                            <TurnCell run={r2} turn={turn2} />
                           </div>
                         </div>
                       );
@@ -1529,6 +1551,8 @@ function App() {
                   </div>
                 </div>
               </div>
+                );
+              })()
             ) : selectedRunId ? (
               // Detailed Inspector View
               <div className="card">

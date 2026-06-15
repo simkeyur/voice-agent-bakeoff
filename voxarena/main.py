@@ -36,9 +36,36 @@ from voxarena.runner import ACTIVE_HARNESSES, create_pending_manifest
 
 
 def _backfill_manifests() -> None:
-    """Walk results/ for manifest.json files and upsert any missing in SQLite."""
+    """Walk results/ for manifest.json files and upsert any missing in SQLite.
+
+    Skips after first successful pass unless a manifest.json on disk is newer
+    than the last-backfill timestamp — avoids paying disk-walk cost on every
+    boot once the install has accumulated a lot of runs.
+    """
+    last_backfill = get_setting("LAST_BACKFILL_TS")
+    last_backfill_ts = float(last_backfill) if last_backfill else 0.0
+
+    # Cheap mtime probe: if no manifest is newer than our last pass, skip.
+    results_dir = settings.RESULTS_DIR
+    if last_backfill_ts > 0 and os.path.isdir(results_dir):
+        newest = 0.0
+        for root, _, files in os.walk(results_dir):
+            for f in files:
+                if f == "manifest.json":
+                    try:
+                        newest = max(newest, os.path.getmtime(os.path.join(root, f)))
+                    except OSError:
+                        pass
+                    if newest > last_backfill_ts:
+                        break
+            if newest > last_backfill_ts:
+                break
+        if newest <= last_backfill_ts:
+            logger.debug("Backfill skipped (no manifest.json newer than last pass).")
+            return
+
     known_ids = set(list_run_ids())
-    manifest_files = glob.glob(os.path.join(settings.RESULTS_DIR, "**", "manifest.json"), recursive=True)
+    manifest_files = glob.glob(os.path.join(results_dir, "**", "manifest.json"), recursive=True)
     for file_path in manifest_files:
         try:
             manifest = RunManifest.load(file_path)
@@ -47,6 +74,8 @@ def _backfill_manifests() -> None:
         except Exception as e:
             logger.error(f"Failed to backfill manifest at {file_path}: {e}")
 
+    set_setting("LAST_BACKFILL_TS", str(time.time()))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,7 +83,18 @@ async def lifespan(app: FastAPI):
     # Disk walks + YAML/JSON parses shouldn't block the event loop on startup.
     await asyncio.to_thread(_backfill_manifests)
     await asyncio.to_thread(bootstrap_utterances_if_empty)
+    await asyncio.to_thread(_prune_synth_cache)
     yield
+
+
+def _prune_synth_cache() -> None:
+    """Drop synthesized WAVs whose hash doesn't match any current utterance text."""
+    try:
+        from voxarena.audio_cache import prune_orphan_synth_files
+        utts = load_utterances_from_db()
+        prune_orphan_synth_files([u.get("text", "") for u in utts])
+    except Exception as e:
+        logger.warning(f"Synth-cache prune failed: {e}")
 
 
 app = FastAPI(
