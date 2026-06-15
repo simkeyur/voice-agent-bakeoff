@@ -968,10 +968,22 @@ function App() {
     if (type === 'none') {
       const { expect, ...rest } = current;
       updated[index] = rest;
-    } else if (type === 'response') {
-      updated[index] = { ...current, expect: { response: current.expect?.response || '' } };
+    } else if (type === 'phrases') {
+      // response_contains: list of substrings — promote a legacy response string if present
+      const existing = Array.isArray(current.expect?.response_contains)
+        ? current.expect.response_contains
+        : (current.expect?.response ? [current.expect.response] : []);
+      updated[index] = { ...current, expect: { response_contains: existing } };
     } else if (type === 'tool') {
-      updated[index] = { ...current, expect: { tool: current.expect?.tool || '', args: current.expect?.args || {} } };
+      updated[index] = {
+        ...current,
+        expect: {
+          tool: current.expect?.tool || '',
+          args: current.expect?.args || {},
+          // preserve response_contains across type switch if user already had one
+          ...(Array.isArray(current.expect?.response_contains) ? { response_contains: current.expect.response_contains } : {}),
+        },
+      };
     }
     setSettingsUtterances(updated);
   };
@@ -2137,7 +2149,14 @@ function App() {
                   </div>
                 ) : (
                   settingsUtterances.map((u, idx) => {
-                    const expectType = u.expect?.tool ? 'tool' : u.expect?.response ? 'response' : 'none';
+                    // Order matters: tool > phrases (response_contains) > legacy response
+                    const expectType = u.expect?.tool
+                      ? 'tool'
+                      : Array.isArray(u.expect?.response_contains)
+                        ? 'phrases'
+                        : u.expect?.response
+                          ? 'phrases'  // migrate legacy {response: "x"} into the phrases editor
+                          : 'none';
                     
                     return (
                       <div key={idx} className="utterance-edit-row" style={{
@@ -2209,20 +2228,36 @@ function App() {
                                 style={{ fontSize: 11, padding: '3px 6px', height: 26 }}
                               >
                                 <option value="none">None (No check)</option>
-                                <option value="response">Expected Response (Substring)</option>
+                                <option value="phrases">Response contains (any of)</option>
                                 <option value="tool">Expected Tool Call</option>
                               </select>
                             </div>
 
-                            {expectType === 'response' && (
+                            {expectType === 'phrases' && (
                               <div className="form-group" style={{ margin: 0 }}>
-                                <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Expected response phrase</label>
+                                <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>
+                                  Phrases the response must contain (comma-separated)
+                                </label>
                                 <input
                                   type="text"
                                   className="text-input"
-                                  value={u.expect?.response || ''}
-                                  onChange={(e) => updateUtteranceExpectField(idx, 'response', e.target.value)}
-                                  placeholder="e.g. open from 9am to 10pm"
+                                  value={(Array.isArray(u.expect?.response_contains)
+                                    ? u.expect.response_contains
+                                    : (u.expect?.response ? [u.expect.response] : [])
+                                  ).join(', ')}
+                                  onChange={(e) => {
+                                    const phrases = e.target.value
+                                      .split(',')
+                                      .map((p) => p.trim())
+                                      .filter((p) => p.length > 0);
+                                    const updated = [...settingsUtterances];
+                                    const current = updated[idx];
+                                    // Wipe legacy `response` if present; canonical field is response_contains.
+                                    const { response: _legacy, ...restExpect } = current.expect || {};
+                                    updated[idx] = { ...current, expect: { ...restExpect, response_contains: phrases } };
+                                    setSettingsUtterances(updated);
+                                  }}
+                                  placeholder="verify, identity"
                                   style={{ fontSize: 12, padding: '3px 6px', height: 26 }}
                                 />
                               </div>
