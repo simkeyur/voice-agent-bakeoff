@@ -3,7 +3,8 @@ import {
   Sun, Moon, Play, Pause, BarChart3, History, Settings, 
   Mic, CloudLightning, AudioLines, ClipboardCheck, ArrowRightLeft, 
   Trash2, CheckCircle2, XCircle, AlertCircle, ArrowLeft,
-  ChevronLeft, ChevronRight, LayoutDashboard, Plus, Cpu, MessageSquare, ShieldAlert, GitCompare
+  ChevronLeft, ChevronRight, LayoutDashboard, Plus, Cpu, MessageSquare, ShieldAlert, GitCompare,
+  DollarSign
 } from 'lucide-react';
 import logoUrl from './assets/logo.png';
 import './App.css';
@@ -253,7 +254,7 @@ function LivePipelineVisualizer({ activeStep }) {
 }
 
 // Custom responsive SVG comparative bar chart
-function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter = true }) {
+function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter = true, decimals = 0, unitPrefix = '' }) {
   const maxValue = Math.max(geminiValue || 0, openaiValue || 0) || 100;
   const geminiPercent = geminiValue ? (geminiValue / maxValue) * 100 : 0;
   const openaiPercent = openaiValue ? (openaiValue / maxValue) * 100 : 0;
@@ -317,7 +318,7 @@ function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter =
               fontWeight="700" 
               textAnchor="end"
             >
-              {geminiValue.toFixed(0)}{unit}
+              {unitPrefix}{geminiValue.toFixed(decimals)}{unit}
             </text>
           </>
         ) : (
@@ -344,7 +345,7 @@ function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter =
               fontWeight="700" 
               textAnchor="end"
             >
-              {openaiValue.toFixed(0)}{unit}
+              {unitPrefix}{openaiValue.toFixed(decimals)}{unit}
             </text>
           </>
         ) : (
@@ -400,6 +401,16 @@ function App() {
   const [openaiModelCustom, setOpenaiModelCustom] = useState('');
   const [geminiSaveMsg, setGeminiSaveMsg] = useState('');
   const [openaiSaveMsg, setOpenaiSaveMsg] = useState('');
+  // Evaluation models (used by the LLM-judge evaluator)
+  const [geminiEvalModel, setGeminiEvalModel] = useState('gemini-3.1-flash-lite');
+  const [openaiEvalModel, setOpenaiEvalModel] = useState('gpt-5.4-mini');
+  // TTS configuration for synthesizing user-utterance audio
+  const [ttsEngine, setTtsEngine] = useState('auto');
+  const [openaiTtsModel, setOpenaiTtsModel] = useState('tts-1');
+  const [openaiTtsVoice, setOpenaiTtsVoice] = useState('nova');
+  const [googleTtsVoice, setGoogleTtsVoice] = useState('en-US-Journey-F');
+  const [ttsEngineAvailable, setTtsEngineAvailable] = useState({ openai: false, google: false, local: false });
+  const [advancedSaveMsg, setAdvancedSaveMsg] = useState('');
   const [settingsUtterances, setSettingsUtterances] = useState([]);
   const [rawArgsState, setRawArgsState] = useState({});
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -435,6 +446,7 @@ function App() {
 
   // Settings sub-tab navigation
   const [settingsSubTab, setSettingsSubTab] = useState('models');
+  const [modelProviderTab, setModelProviderTab] = useState('gemini');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [confirmModalConfig, setConfirmModalConfig] = useState(null);
 
@@ -840,6 +852,15 @@ function App() {
           setOpenaiModelCustom(oModel);
         }
 
+        // Advanced: evaluation models + TTS
+        if (settingsData.gemini_eval_model) setGeminiEvalModel(settingsData.gemini_eval_model);
+        if (settingsData.openai_eval_model) setOpenaiEvalModel(settingsData.openai_eval_model);
+        if (settingsData.tts_engine) setTtsEngine(settingsData.tts_engine);
+        if (settingsData.openai_tts_model) setOpenaiTtsModel(settingsData.openai_tts_model);
+        if (settingsData.openai_tts_voice) setOpenaiTtsVoice(settingsData.openai_tts_voice);
+        if (settingsData.google_tts_voice) setGoogleTtsVoice(settingsData.google_tts_voice);
+        if (settingsData.tts_engine_available) setTtsEngineAvailable(settingsData.tts_engine_available);
+
         const rawArgs = {};
         if (Array.isArray(utterancesData)) {
           utterancesData.forEach((u, idx) => {
@@ -859,6 +880,36 @@ function App() {
       setSelectedTemplateId(backendConfig.active_template);
     }
   }, [backendConfig]);
+
+  const handleSaveAdvancedSettings = () => {
+    setAdvancedSaveMsg('Saving...');
+    const geminiModel = geminiModelSelect === 'custom' ? geminiModelCustom : geminiModelSelect;
+    const openaiModel = openaiModelSelect === 'custom' ? openaiModelCustom : openaiModelSelect;
+    fetch(`${backendUrl}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        // Keep main provider models intact; backend rejects empty strings here.
+        gemini_model: geminiModel,
+        openai_model: openaiModel,
+        gemini_eval_model: geminiEvalModel,
+        openai_eval_model: openaiEvalModel,
+        tts_engine: ttsEngine,
+        openai_tts_model: openaiTtsModel,
+        openai_tts_voice: openaiTtsVoice,
+        google_tts_voice: googleTtsVoice,
+      })
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to save advanced settings');
+        return res.json();
+      })
+      .then(() => {
+        setAdvancedSaveMsg('Saved.');
+        setTimeout(() => setAdvancedSaveMsg(''), 2000);
+      })
+      .catch((err) => setAdvancedSaveMsg(`Error: ${err.message}`));
+  };
 
   const handleSaveModelSettings = (provider) => {
     const isGemini = provider === 'gemini';
@@ -1050,6 +1101,31 @@ function App() {
         ...current.expect,
         [field]: value
       }
+    };
+    setSettingsUtterances(updated);
+  };
+
+  const updateUtteranceBehavior = (index, type) => {
+    const updated = [...settingsUtterances];
+    const current = updated[index];
+    if (type === 'sequential') {
+      const { behavior, ...rest } = current;
+      updated[index] = rest;
+    } else {
+      updated[index] = {
+        ...current,
+        behavior: { type, delay_ms: current.behavior?.delay_ms ?? 600 },
+      };
+    }
+    setSettingsUtterances(updated);
+  };
+
+  const updateUtteranceBehaviorField = (index, field, value) => {
+    const updated = [...settingsUtterances];
+    const current = updated[index];
+    updated[index] = {
+      ...current,
+      behavior: { ...current.behavior, [field]: value },
     };
     setSettingsUtterances(updated);
   };
@@ -1312,12 +1388,14 @@ function App() {
             const accuracies = pRuns.map(r => r.aggregate_metrics?.tool_call_accuracy_rate).filter(v => v != null);
             const interruptions = pRuns.map(r => r.aggregate_metrics?.average_interruption_stop_latency_ms).filter(v => v != null);
             const hallucinations = pRuns.map(r => r.aggregate_metrics?.hallucination_count || 0);
-            
+            const costs = pRuns.map(r => r.aggregate_metrics?.total_cost_usd).filter(v => v != null);
+
             return {
               avgTtfa: ttfas.length ? sum(ttfas) / ttfas.length : null,
               avgAccuracy: accuracies.length ? (sum(accuracies) / accuracies.length) * 100 : null,
               avgInterruption: interruptions.length ? sum(interruptions) / interruptions.length : null,
               totalHallucinations: sum(hallucinations),
+              avgCost: costs.length ? sum(costs) / costs.length : null,
               runCount: pRuns.length
             };
           };
@@ -1361,7 +1439,7 @@ function App() {
                 </div>
               ) : (
                 <div>
-                  <div className="grid-3" style={{ marginBottom: 16 }}>
+                  <div className="grid-4" style={{ marginBottom: 16 }}>
                     <div className="card">
                       <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><CloudLightning size={16} style={{ color: 'var(--color-primary)' }} />Latency Showdown (TTFA)</span></div>
                       <div className="card-body">
@@ -1401,6 +1479,22 @@ function App() {
                           lowerIsBetter={true} 
                         />
                         <div className="metric-label" style={{ marginTop: 12 }}>Lower is better. Time taken to stop speaking upon user interruption.</div>
+                      </div>
+                    </div>
+
+                    <div className="card">
+                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><DollarSign size={16} style={{ color: 'var(--color-primary)' }} />Cost per Run</span></div>
+                      <div className="card-body">
+                        <CustomBarChart
+                          geminiValue={geminiStats?.avgCost}
+                          openaiValue={openaiStats?.avgCost}
+                          title="Average Estimated Cost"
+                          unit=""
+                          unitPrefix="$"
+                          decimals={4}
+                          lowerIsBetter={true}
+                        />
+                        <div className="metric-label" style={{ marginTop: 12 }}>Lower is better. Estimated token cost per run from provider usage metrics.</div>
                       </div>
                     </div>
                   </div>
@@ -1505,6 +1599,9 @@ function App() {
                 const hallWinner = ((m1.hallucination_count ?? 0) < (m2.hallucination_count ?? 0))
                   ? r1.run_id
                   : ((m2.hallucination_count ?? 0) < (m1.hallucination_count ?? 0) ? r2.run_id : null);
+                const costWinner = (m1.total_cost_usd != null && m2.total_cost_usd != null)
+                  ? (m1.total_cost_usd < m2.total_cost_usd ? r1.run_id : (m2.total_cost_usd < m1.total_cost_usd ? r2.run_id : null))
+                  : null;
 
                 const ttfaDelta = (m1.average_ttfa_ms != null && m2.average_ttfa_ms != null)
                   ? Math.abs(m1.average_ttfa_ms - m2.average_ttfa_ms).toFixed(0)
@@ -1532,6 +1629,7 @@ function App() {
                   const isTtfaW = winners.ttfa === run.run_id;
                   const isAccW = winners.acc === run.run_id;
                   const isHallW = winners.hall === run.run_id;
+                  const isCostW = winners.cost === run.run_id;
                   return (
                     <div className="comparison-card">
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -1559,12 +1657,17 @@ function App() {
                           isWinner={isHallW}
                           tone={(m.hallucination_count ?? 0) > 0 ? 'error' : null}
                         />
+                        <Metric
+                          label="Est. Cost"
+                          value={m.total_cost_usd != null ? `$${m.total_cost_usd.toFixed(4)}` : '—'}
+                          isWinner={isCostW}
+                        />
                       </div>
                     </div>
                   );
                 };
 
-                const winners = { ttfa: ttfaWinner, acc: accWinner, hall: hallWinner, ttfaDelta };
+                const winners = { ttfa: ttfaWinner, acc: accWinner, hall: hallWinner, cost: costWinner, ttfaDelta };
 
                 const TurnCell = ({ run, turn }) => {
                   const passed = !!turn.transcript_output && turn.evaluation_passed !== false;
@@ -2122,192 +2225,309 @@ function App() {
 
             {settingsSubTab === 'models' && (
               <>
-                {/* Model Configuration Table */}
+                {/* Model Configuration with provider tabs */}
                 <div className="card" style={{ margin: 0 }}>
-                  <div className="card-header">
+                  <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span className="card-title">Model Configurations</span>
+                    <div style={{ display: 'flex', gap: 0, borderBottom: 'none' }}>
+                      {[
+                        { id: 'gemini', label: 'Google Gemini' },
+                        { id: 'openai', label: 'OpenAI' },
+                      ].map((t) => {
+                        const isActive = modelProviderTab === t.id;
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => setModelProviderTab(t.id)}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              borderBottom: isActive ? '2px solid var(--color-primary)' : '2px solid transparent',
+                              color: isActive ? 'var(--fg)' : 'var(--muted)',
+                              fontWeight: isActive ? 600 : 500,
+                              fontSize: 13,
+                              padding: '6px 14px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {t.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="card-body" style={{ padding: 0 }}>
-                    <table className="runs-table" style={{ margin: 0 }}>
-                      <thead>
-                        <tr>
-                          <th style={{ width: '160px' }}>Provider</th>
-                          <th>API Key Configuration</th>
-                          <th style={{ width: '320px' }}>Active Model</th>
-                          <th style={{ width: '130px', textAlign: 'center' }}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {/* Google Gemini Row */}
-                        <tr>
-                          <td style={{ verticalAlign: 'top', fontWeight: '600', padding: '16px 12px' }}>
-                            GOOGLE GEMINI
-                          </td>
-                          <td style={{ verticalAlign: 'top', padding: '16px 12px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                              <div style={{ display: 'flex', gap: 8 }}>
-                                <input
-                                  type="password"
-                                  className="text-input"
-                                  value={settingsGoogleApiKey}
-                                  onChange={(e) => {
-                                    setSettingsGoogleApiKey(e.target.value);
-                                    setGeminiVerifiedStatus(null);
-                                  }}
-                                  placeholder={settingsGoogleApiKey ? "••••••••" : "Enter Google API Key"}
-                                  style={{ flex: 1, height: 32, fontSize: 13, padding: '4px 10px' }}
-                                />
-                                <button 
-                                  type="button" 
-                                  className="btn" 
-                                  onClick={() => handleVerifyKey('gemini')}
-                                  disabled={verifyingProvider === 'gemini'}
-                                  style={{ fontSize: 12, padding: '4px 12px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4, height: 32 }}
-                                >
-                                  {verifyingProvider === 'gemini' ? 'Verifying...' : 'Verify'}
-                                </button>
-                              </div>
-                              {geminiVerifiedStatus && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: geminiVerifiedStatus.success ? 'var(--success)' : 'var(--error)' }}>
-                                  {geminiVerifiedStatus.success ? (
-                                    <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
-                                  ) : (
-                                    <XCircle size={14} style={{ color: 'var(--error)', flexShrink: 0 }} />
-                                  )}
-                                  <span>{geminiVerifiedStatus.message}</span>
-                                </div>
-                              )}
+                  <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {modelProviderTab === 'gemini' && (
+                      <>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label">Google API Key</label>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <input
+                              type="password"
+                              className="text-input"
+                              value={settingsGoogleApiKey}
+                              onChange={(e) => {
+                                setSettingsGoogleApiKey(e.target.value);
+                                setGeminiVerifiedStatus(null);
+                              }}
+                              placeholder={settingsGoogleApiKey ? '••••••••' : 'Enter Google API Key'}
+                              style={{ flex: 1, height: 32, fontSize: 13 }}
+                            />
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => handleVerifyKey('gemini')}
+                              disabled={verifyingProvider === 'gemini'}
+                              style={{ fontSize: 12, padding: '4px 12px', height: 32 }}
+                            >
+                              {verifyingProvider === 'gemini' ? 'Verifying...' : 'Verify'}
+                            </button>
+                          </div>
+                          {geminiVerifiedStatus && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 6, color: geminiVerifiedStatus.success ? 'var(--success)' : 'var(--error)' }}>
+                              {geminiVerifiedStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                              <span>{geminiVerifiedStatus.message}</span>
                             </div>
-                          </td>
-                          <td style={{ verticalAlign: 'top', padding: '16px 12px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                              <select
-                                  className="select-input"
-                                  value={geminiModelSelect}
-                                  onChange={(e) => setGeminiModelSelect(e.target.value)}
-                                  style={{ height: 32, fontSize: 13, padding: '4px 10px' }}
-                                >
-                                  <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live Preview (Default)</option>
-                                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                                  <option value="gemini-2.5-flash-8b">Gemini 2.5 Flash 8B</option>
-                                  <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash Exp</option>
-                                  <option value="custom">Custom Model...</option>
-                                </select>
-                                {geminiModelSelect === 'custom' && (
-                                  <input
-                                    type="text"
-                                    className="text-input"
-                                    value={geminiModelCustom}
-                                    onChange={(e) => setGeminiModelCustom(e.target.value)}
-                                    placeholder="Custom Model ID (e.g. gemini-3.1-flash)"
-                                    style={{ height: 32, fontSize: 13, padding: '4px 10px' }}
-                                  />
-                                )}
-                            </div>
-                          </td>
-                          <td style={{ verticalAlign: 'top', textAlign: 'center', padding: '16px 12px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                              <button 
-                                className="btn btn-primary" 
-                                onClick={() => handleSaveModelSettings('gemini')}
-                                style={{ fontSize: 12, padding: '4px 12px', height: 32, width: '70px' }}
-                              >
-                                Save
-                              </button>
-                              {geminiSaveMsg && (
-                                <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block' }}>
-                                  {geminiSaveMsg}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
+                          )}
+                        </div>
 
-                        {/* OpenAI Row */}
-                        <tr>
-                          <td style={{ verticalAlign: 'top', fontWeight: '600', padding: '16px 12px' }}>
-                            OPENAI
-                          </td>
-                          <td style={{ verticalAlign: 'top', padding: '16px 12px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                              <div style={{ display: 'flex', gap: 8 }}>
-                                <input
-                                  type="password"
-                                  className="text-input"
-                                  value={settingsOpenaiApiKey}
-                                  onChange={(e) => {
-                                    setSettingsOpenaiApiKey(e.target.value);
-                                    setOpenaiVerifiedStatus(null);
-                                  }}
-                                  placeholder={settingsOpenaiApiKey ? "••••••••" : "Enter OpenAI API Key"}
-                                  style={{ flex: 1, height: 32, fontSize: 13, padding: '4px 10px' }}
-                                />
-                                <button 
-                                  type="button" 
-                                  className="btn" 
-                                  onClick={() => handleVerifyKey('openai')}
-                                  disabled={verifyingProvider === 'openai'}
-                                  style={{ fontSize: 12, padding: '4px 12px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4, height: 32 }}
-                                >
-                                  {verifyingProvider === 'openai' ? 'Verifying...' : 'Verify'}
-                                </button>
-                              </div>
-                              {openaiVerifiedStatus && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: openaiVerifiedStatus.success ? 'var(--success)' : 'var(--error)' }}>
-                                  {openaiVerifiedStatus.success ? (
-                                    <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
-                                  ) : (
-                                    <XCircle size={14} style={{ color: 'var(--error)', flexShrink: 0 }} />
-                                  )}
-                                  <span>{openaiVerifiedStatus.message}</span>
-                                </div>
-                              )}
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label">Realtime model</label>
+                          <select
+                            className="select-input"
+                            value={geminiModelSelect}
+                            onChange={(e) => setGeminiModelSelect(e.target.value)}
+                            style={{ height: 32, fontSize: 13 }}
+                          >
+                            <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live Preview (Default)</option>
+                            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                            <option value="gemini-2.5-flash-8b">Gemini 2.5 Flash 8B</option>
+                            <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash Exp</option>
+                            <option value="custom">Custom Model...</option>
+                          </select>
+                          {geminiModelSelect === 'custom' && (
+                            <input
+                              type="text"
+                              className="text-input"
+                              value={geminiModelCustom}
+                              onChange={(e) => setGeminiModelCustom(e.target.value)}
+                              placeholder="Custom Model ID (e.g. gemini-3.1-flash)"
+                              style={{ height: 32, fontSize: 13, marginTop: 6 }}
+                            />
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => handleSaveModelSettings('gemini')}
+                            style={{ fontSize: 13, padding: '6px 16px' }}
+                          >
+                            Save Gemini settings
+                          </button>
+                          {geminiSaveMsg && (
+                            <span style={{ fontSize: 12, color: 'var(--muted)' }}>{geminiSaveMsg}</span>
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    {modelProviderTab === 'openai' && (
+                      <>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label">OpenAI API Key</label>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <input
+                              type="password"
+                              className="text-input"
+                              value={settingsOpenaiApiKey}
+                              onChange={(e) => {
+                                setSettingsOpenaiApiKey(e.target.value);
+                                setOpenaiVerifiedStatus(null);
+                              }}
+                              placeholder={settingsOpenaiApiKey ? '••••••••' : 'Enter OpenAI API Key'}
+                              style={{ flex: 1, height: 32, fontSize: 13 }}
+                            />
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => handleVerifyKey('openai')}
+                              disabled={verifyingProvider === 'openai'}
+                              style={{ fontSize: 12, padding: '4px 12px', height: 32 }}
+                            >
+                              {verifyingProvider === 'openai' ? 'Verifying...' : 'Verify'}
+                            </button>
+                          </div>
+                          {openaiVerifiedStatus && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 6, color: openaiVerifiedStatus.success ? 'var(--success)' : 'var(--error)' }}>
+                              {openaiVerifiedStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                              <span>{openaiVerifiedStatus.message}</span>
                             </div>
-                          </td>
-                          <td style={{ verticalAlign: 'top', padding: '16px 12px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                              <select
-                                className="select-input"
-                                value={openaiModelSelect}
-                                onChange={(e) => setOpenaiModelSelect(e.target.value)}
-                                style={{ height: 32, fontSize: 13, padding: '4px 10px' }}
-                              >
-                                <option value="gpt-realtime-2">GPT Realtime 2 (Default)</option>
-                                <option value="gpt-4o-realtime-preview">GPT-4o Realtime Preview</option>
-                                <option value="gpt-4o-mini-realtime-preview">GPT-4o mini Realtime Preview</option>
-                                <option value="custom">Custom Model...</option>
-                              </select>
-                              {openaiModelSelect === 'custom' && (
-                                <input
-                                  type="text"
-                                  className="text-input"
-                                  value={openaiModelCustom}
-                                  onChange={(e) => setOpenaiModelCustom(e.target.value)}
-                                  placeholder="Custom Model ID (e.g. gpt-realtime-2)"
-                                  style={{ height: 32, fontSize: 13, padding: '4px 10px' }}
-                                />
-                              )}
-                            </div>
-                          </td>
-                          <td style={{ verticalAlign: 'top', textAlign: 'center', padding: '16px 12px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                              <button 
-                                className="btn btn-primary" 
-                                onClick={() => handleSaveModelSettings('openai')}
-                                style={{ fontSize: 12, padding: '4px 12px', height: 32, width: '70px' }}
-                              >
-                                Save
-                              </button>
-                              {openaiSaveMsg && (
-                                <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block' }}>
-                                  {openaiSaveMsg}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
+                          )}
+                        </div>
+
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label">Realtime model</label>
+                          <select
+                            className="select-input"
+                            value={openaiModelSelect}
+                            onChange={(e) => setOpenaiModelSelect(e.target.value)}
+                            style={{ height: 32, fontSize: 13 }}
+                          >
+                            <option value="gpt-realtime-2">GPT Realtime 2 (Default)</option>
+                            <option value="gpt-4o-realtime-preview">GPT-4o Realtime Preview</option>
+                            <option value="gpt-4o-mini-realtime-preview">GPT-4o mini Realtime Preview</option>
+                            <option value="custom">Custom Model...</option>
+                          </select>
+                          {openaiModelSelect === 'custom' && (
+                            <input
+                              type="text"
+                              className="text-input"
+                              value={openaiModelCustom}
+                              onChange={(e) => setOpenaiModelCustom(e.target.value)}
+                              placeholder="Custom Model ID (e.g. gpt-realtime-2)"
+                              style={{ height: 32, fontSize: 13, marginTop: 6 }}
+                            />
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => handleSaveModelSettings('openai')}
+                            style={{ fontSize: 13, padding: '6px 16px' }}
+                          >
+                            Save OpenAI settings
+                          </button>
+                          {openaiSaveMsg && (
+                            <span style={{ fontSize: 12, color: 'var(--muted)' }}>{openaiSaveMsg}</span>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Advanced: Evaluation models + TTS configuration */}
+                <div className="card" style={{ margin: '16px 0 0 0' }}>
+                  <div className="card-header">
+                    <span className="card-title">Advanced: Evaluation & TTS</span>
+                  </div>
+                  <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      <strong>Evaluation models</strong> are the cheaper text-only models used by the LLM-judge reviewer for tool-call correctness and hallucination scoring. They do not affect the live voice agent.
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Gemini evaluator model</label>
+                        <input
+                          type="text"
+                          className="text-input"
+                          value={geminiEvalModel}
+                          onChange={(e) => setGeminiEvalModel(e.target.value)}
+                          placeholder="e.g. gemini-3.1-flash-lite"
+                          style={{ height: 32, fontSize: 13 }}
+                        />
+                      </div>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">OpenAI evaluator model</label>
+                        <input
+                          type="text"
+                          className="text-input"
+                          value={openaiEvalModel}
+                          onChange={(e) => setOpenaiEvalModel(e.target.value)}
+                          placeholder="e.g. gpt-5.4-mini"
+                          style={{ height: 32, fontSize: 13 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      <strong>TTS engine</strong> renders each utterance into audio that the harness then plays into the voice agent. <code>Auto</code> picks the first available in this order: OpenAI → Google → local OS. An explicit choice tries that engine first but still falls back if it's unavailable.
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16 }}>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Engine</label>
+                        <select
+                          className="select-input"
+                          value={ttsEngine}
+                          onChange={(e) => setTtsEngine(e.target.value)}
+                          style={{ height: 32, fontSize: 13 }}
+                        >
+                          <option value="auto">Auto (recommended)</option>
+                          <option value="openai" disabled={!ttsEngineAvailable.openai}>
+                            OpenAI{!ttsEngineAvailable.openai ? ' (no key)' : ''}
+                          </option>
+                          <option value="google" disabled={!ttsEngineAvailable.google}>
+                            Google{!ttsEngineAvailable.google ? ' (no key)' : ''}
+                          </option>
+                          <option value="local" disabled={!ttsEngineAvailable.local}>
+                            Local OS{!ttsEngineAvailable.local ? ' (unavailable)' : ''}
+                          </option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">OpenAI TTS model</label>
+                        <select
+                          className="select-input"
+                          value={openaiTtsModel}
+                          onChange={(e) => setOpenaiTtsModel(e.target.value)}
+                          style={{ height: 32, fontSize: 13 }}
+                        >
+                          <option value="tts-1">tts-1 (default)</option>
+                          <option value="tts-1-hd">tts-1-hd</option>
+                          <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">OpenAI TTS voice</label>
+                        <select
+                          className="select-input"
+                          value={openaiTtsVoice}
+                          onChange={(e) => setOpenaiTtsVoice(e.target.value)}
+                          style={{ height: 32, fontSize: 13 }}
+                        >
+                          <option value="nova">nova</option>
+                          <option value="alloy">alloy</option>
+                          <option value="echo">echo</option>
+                          <option value="fable">fable</option>
+                          <option value="onyx">onyx</option>
+                          <option value="shimmer">shimmer</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Google TTS voice</label>
+                        <input
+                          type="text"
+                          className="text-input"
+                          value={googleTtsVoice}
+                          onChange={(e) => setGoogleTtsVoice(e.target.value)}
+                          placeholder="e.g. en-US-Journey-F"
+                          style={{ height: 32, fontSize: 13 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                      <strong>Local OS availability:</strong>{' '}
+                      macOS uses <code>say</code> (built-in); Linux requires <code>espeak-ng</code> or <code>espeak</code> on PATH; Windows uses PowerShell's <code>System.Speech.Synthesis</code>.
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleSaveAdvancedSettings}
+                        style={{ fontSize: 13, padding: '6px 16px' }}
+                      >
+                        Save Advanced
+                      </button>
+                      {advancedSaveMsg && (
+                        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{advancedSaveMsg}</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </>
@@ -2617,6 +2837,56 @@ function App() {
                                       </div>
                                     </div>
                                   )}
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: 8, alignItems: 'end' }}>
+                                  <div className="form-group" style={{ margin: 0 }}>
+                                    <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Turn behavior</label>
+                                    <select
+                                      className="select-input"
+                                      value={u.behavior?.type || 'sequential'}
+                                      onChange={(e) => updateUtteranceBehavior(idx, e.target.value)}
+                                      style={{ fontSize: 11, padding: '3px 6px', height: 26 }}
+                                    >
+                                      <option value="sequential">Sequential (default)</option>
+                                      <option value="barge_in">Barge-in (interrupt previous turn)</option>
+                                    </select>
+                                  </div>
+
+                                  {u.behavior?.type === 'barge_in' && (
+                                    <div className="form-group" style={{ margin: 0 }}>
+                                      <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Delay before interrupting (ms)</label>
+                                      <input
+                                        type="number"
+                                        className="text-input"
+                                        value={u.behavior?.delay_ms ?? 600}
+                                        onChange={(e) => updateUtteranceBehaviorField(idx, 'delay_ms', parseInt(e.target.value, 10) || 0)}
+                                        style={{ fontSize: 12, padding: '3px 6px', height: 26 }}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="form-group" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <input
+                                    type="checkbox"
+                                    id={`interrupted-${idx}`}
+                                    checked={!!u.expect?.interrupted}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        updateUtteranceExpectField(idx, 'interrupted', true);
+                                      } else {
+                                        const updated = [...settingsUtterances];
+                                        const current = updated[idx];
+                                        const { interrupted, ...restExpect } = current.expect || {};
+                                        updated[idx] = { ...current, expect: restExpect };
+                                        setSettingsUtterances(updated);
+                                      }
+                                    }}
+                                  />
+                                  <label className="form-label" htmlFor={`interrupted-${idx}`} style={{ fontSize: 11, margin: 0 }}>
+                                    Assert this turn was interrupted (barge-in)
+                                  </label>
                                 </div>
                               </div>
                             </div>

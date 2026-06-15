@@ -174,6 +174,24 @@ class SettingsUpdateRequest(BaseModel):
     openai_model: str
     google_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
+    # Evaluation models (optional — keep existing values if omitted)
+    gemini_eval_model: Optional[str] = None
+    openai_eval_model: Optional[str] = None
+    # TTS configuration (optional)
+    tts_engine: Optional[str] = None
+    openai_tts_model: Optional[str] = None
+    openai_tts_voice: Optional[str] = None
+    google_tts_voice: Optional[str] = None
+
+
+def _current_tts_capabilities() -> dict:
+    """Which TTS engines this host can actually use right now."""
+    from voxarena.audio_cache import _engine_available
+    return {
+        "openai": _engine_available("openai"),
+        "google": _engine_available("google"),
+        "local": _engine_available("local"),
+    }
 
 
 @app.get("/api/settings")
@@ -185,6 +203,13 @@ async def get_settings():
         "openai_model": get_setting("OPENAI_MODEL") or settings.OPENAI_MODEL,
         "google_api_key": "••••••••" if google_key else "",
         "openai_api_key": "••••••••" if openai_key else "",
+        "gemini_eval_model": get_setting("GEMINI_EVAL_MODEL") or settings.GEMINI_EVAL_MODEL,
+        "openai_eval_model": get_setting("OPENAI_EVAL_MODEL") or settings.OPENAI_EVAL_MODEL,
+        "tts_engine": get_setting("TTS_ENGINE") or settings.TTS_ENGINE,
+        "openai_tts_model": get_setting("OPENAI_TTS_MODEL") or settings.OPENAI_TTS_MODEL,
+        "openai_tts_voice": get_setting("OPENAI_TTS_VOICE") or settings.OPENAI_TTS_VOICE,
+        "google_tts_voice": get_setting("GOOGLE_TTS_VOICE") or settings.GOOGLE_TTS_VOICE,
+        "tts_engine_available": _current_tts_capabilities(),
     }
 
 
@@ -198,11 +223,23 @@ async def update_settings(req: SettingsUpdateRequest):
     if req.openai_api_key is not None and req.openai_api_key != "••••••••":
         set_setting("OPENAI_API_KEY", req.openai_api_key)
 
-    return {
-        "status": "saved",
-        "gemini_model": req.gemini_model,
-        "openai_model": req.openai_model,
-    }
+    if req.gemini_eval_model:
+        set_setting("GEMINI_EVAL_MODEL", req.gemini_eval_model)
+    if req.openai_eval_model:
+        set_setting("OPENAI_EVAL_MODEL", req.openai_eval_model)
+
+    if req.tts_engine:
+        if req.tts_engine not in ("auto", "openai", "google", "local"):
+            raise HTTPException(status_code=400, detail=f"Invalid tts_engine: {req.tts_engine}")
+        set_setting("TTS_ENGINE", req.tts_engine)
+    if req.openai_tts_model:
+        set_setting("OPENAI_TTS_MODEL", req.openai_tts_model)
+    if req.openai_tts_voice:
+        set_setting("OPENAI_TTS_VOICE", req.openai_tts_voice)
+    if req.google_tts_voice:
+        set_setting("GOOGLE_TTS_VOICE", req.google_tts_voice)
+
+    return {"status": "saved"}
 
 
 class VerifyKeyRequest(BaseModel):

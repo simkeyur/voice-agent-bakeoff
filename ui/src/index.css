@@ -228,6 +228,12 @@ a {
   gap: 6px;
 }
 
+.grid-4 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 6px;
+}
+
 .card {
   border: 1px solid var(--border);
   border-radius: 8px;

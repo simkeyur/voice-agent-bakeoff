@@ -93,6 +93,9 @@ def init_db():
                 evaluation_notes TEXT,
                 response_match INTEGER,
                 evaluation_passed INTEGER,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                cost_usd REAL,
                 PRIMARY KEY (run_id, utterance_id),
                 FOREIGN KEY (run_id) REFERENCES runs (run_id) ON DELETE CASCADE
             );
@@ -103,6 +106,12 @@ def init_db():
             conn.execute("ALTER TABLE turns ADD COLUMN response_match INTEGER;")
         if "evaluation_passed" not in existing_cols:
             conn.execute("ALTER TABLE turns ADD COLUMN evaluation_passed INTEGER;")
+        if "prompt_tokens" not in existing_cols:
+            conn.execute("ALTER TABLE turns ADD COLUMN prompt_tokens INTEGER;")
+        if "completion_tokens" not in existing_cols:
+            conn.execute("ALTER TABLE turns ADD COLUMN completion_tokens INTEGER;")
+        if "cost_usd" not in existing_cols:
+            conn.execute("ALTER TABLE turns ADD COLUMN cost_usd REAL;")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS settings (
@@ -116,7 +125,8 @@ def init_db():
                 id TEXT PRIMARY KEY,
                 text TEXT NOT NULL,
                 expect TEXT,
-                position INTEGER NOT NULL DEFAULT 0
+                position INTEGER NOT NULL DEFAULT 0,
+                behavior TEXT
             );
         """)
 
@@ -128,6 +138,8 @@ def init_db():
             conn.execute(
                 "UPDATE utterances SET position = (SELECT COUNT(*) FROM utterances u2 WHERE u2.rowid <= utterances.rowid);"
             )
+        if "behavior" not in utt_cols:
+            conn.execute("ALTER TABLE utterances ADD COLUMN behavior TEXT;")
 
         conn.commit()
     _INITIALIZED = True
@@ -162,8 +174,8 @@ _TURN_UPSERT_SQL = """
         audio_completed_received_at, interruption_sent_at, interruption_stopped_at,
         time_to_first_audio_ms, interruption_stop_latency_ms, tool_call_correct,
         tool_call_details, hallucination_count, evaluation_notes,
-        response_match, evaluation_passed
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        response_match, evaluation_passed, prompt_tokens, completion_tokens, cost_usd
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id, utterance_id) DO UPDATE SET
         text_input = excluded.text_input,
         audio_input_path = excluded.audio_input_path,
@@ -181,7 +193,10 @@ _TURN_UPSERT_SQL = """
         hallucination_count = excluded.hallucination_count,
         evaluation_notes = excluded.evaluation_notes,
         response_match = excluded.response_match,
-        evaluation_passed = excluded.evaluation_passed;
+        evaluation_passed = excluded.evaluation_passed,
+        prompt_tokens = excluded.prompt_tokens,
+        completion_tokens = excluded.completion_tokens,
+        cost_usd = excluded.cost_usd;
 """
 
 
@@ -206,6 +221,7 @@ def _turn_row(run_id: str, turn: TurnMetric) -> tuple:
         json.dumps(turn.tool_call_details) if turn.tool_call_details else None,
         turn.hallucination_count, turn.evaluation_notes,
         _bool_or_none(turn.response_match), _bool_or_none(turn.evaluation_passed),
+        turn.prompt_tokens, turn.completion_tokens, turn.cost_usd,
     )
 
 
@@ -292,6 +308,9 @@ def load_run_manifest(run_id: str) -> Optional[RunManifest]:
                 evaluation_notes=row["evaluation_notes"],
                 response_match=response_match,
                 evaluation_passed=evaluation_passed,
+                prompt_tokens=row["prompt_tokens"] if "prompt_tokens" in row.keys() else None,
+                completion_tokens=row["completion_tokens"] if "completion_tokens" in row.keys() else None,
+                cost_usd=row["cost_usd"] if "cost_usd" in row.keys() else None,
             ))
 
         metrics = AggregateMetrics()
@@ -387,7 +406,7 @@ def load_utterances_from_db() -> List[Dict[str, Any]]:
     _ensure_initialized()
     with get_db_connection() as conn:
         rows = conn.execute(
-            "SELECT id, text, expect FROM utterances ORDER BY position ASC, id ASC;"
+            "SELECT id, text, expect, behavior FROM utterances ORDER BY position ASC, id ASC;"
         ).fetchall()
         utterances = []
         for row in rows:
@@ -397,11 +416,20 @@ def load_utterances_from_db() -> List[Dict[str, Any]]:
                     expect = json.loads(row["expect"])
                 except Exception:
                     pass
-            utterances.append({
+            behavior = {}
+            if row["behavior"]:
+                try:
+                    behavior = json.loads(row["behavior"])
+                except Exception:
+                    pass
+            utterance = {
                 "id": row["id"],
                 "text": row["text"],
                 "expect": expect,
-            })
+            }
+            if behavior:
+                utterance["behavior"] = behavior
+            utterances.append(utterance)
         return utterances
 
 
@@ -414,7 +442,7 @@ def save_utterances_to_db(utterances: List[Dict[str, Any]]) -> None:
     """
     _ensure_initialized()
     rows = [
-        (u["id"], u["text"], json.dumps(u.get("expect") or {}), idx)
+        (u["id"], u["text"], json.dumps(u.get("expect") or {}), idx, json.dumps(u.get("behavior") or {}))
         for idx, u in enumerate(utterances)
     ]
     keep_ids = [r[0] for r in rows]
@@ -424,12 +452,13 @@ def save_utterances_to_db(utterances: List[Dict[str, Any]]) -> None:
         try:
             if rows:
                 conn.executemany("""
-                    INSERT INTO utterances (id, text, expect, position)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO utterances (id, text, expect, position, behavior)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         text = excluded.text,
                         expect = excluded.expect,
-                        position = excluded.position;
+                        position = excluded.position,
+                        behavior = excluded.behavior;
                 """, rows)
                 placeholders = ",".join("?" * len(keep_ids))
                 conn.execute(

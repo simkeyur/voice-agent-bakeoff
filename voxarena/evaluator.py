@@ -4,7 +4,7 @@ import yaml
 from typing import Dict, Any, List, Optional
 from loguru import logger
 
-from voxarena.config import settings
+from voxarena.config import get_setting, settings
 from voxarena.manifest import RunManifest, TurnMetric
 
 class SaffronLeafEvaluator:
@@ -36,9 +36,10 @@ class SaffronLeafEvaluator:
             if self.provider == "gemini":
                 from google import genai
                 from google.genai import types
+                eval_model = get_setting("GEMINI_EVAL_MODEL") or settings.GEMINI_EVAL_MODEL
                 client = genai.Client(api_key=self.api_key)
                 response = client.models.generate_content(
-                    model=settings.GEMINI_EVAL_MODEL,
+                    model=eval_model,
                     contents=user_prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=system_prompt,
@@ -47,12 +48,13 @@ class SaffronLeafEvaluator:
                     )
                 )
                 return json.loads(response.text)
-                
+
             elif self.provider == "openai":
                 from openai import OpenAI
+                eval_model = get_setting("OPENAI_EVAL_MODEL") or settings.OPENAI_EVAL_MODEL
                 client = OpenAI(api_key=self.api_key)
                 response = client.chat.completions.create(
-                    model=settings.OPENAI_EVAL_MODEL,
+                    model=eval_model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}

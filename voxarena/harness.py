@@ -11,7 +11,6 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     OutputAudioRawFrame,
     EndFrame,
-    InterruptionFrame,
     StopTaskFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame
@@ -19,7 +18,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.pipeline.runner import PipelineRunner
 
 from voxarena.agent import Agent
@@ -28,6 +27,7 @@ from voxarena.config import ProviderConfig, settings
 from voxarena.database import load_utterances_from_db
 from voxarena.manifest import RunManifest, TurnMetric, AggregateMetrics
 from voxarena.providers import make_adapter
+from voxarena.turn_behaviors import BEHAVIOR_HANDLERS, TurnContext, handle_sequential
 
 class AudioInjectionProcessor(FrameProcessor):
     """Processor designed to stream raw PCM audio frames into the pipeline in real-time."""
@@ -234,7 +234,9 @@ class EvaluationHarness:
         ])
         
         runner = PipelineRunner()
-        task = self.task = PipelineTask(pipeline)
+        task = self.task = PipelineTask(
+            pipeline, params=PipelineParams(enable_metrics=True, enable_usage_metrics=True)
+        )
         injector.task = task
         
         # Start Pipecat pipeline task in background
@@ -271,6 +273,8 @@ class EvaluationHarness:
         session_timeout_sec = max(60.0, len(utterances) * 30.0)
 
         async def _drive_turns():
+            pending_injection_task: Optional[asyncio.Task] = None
+
             for i, utt in enumerate(utterances):
                 if self.stop_requested:
                     logger.info("[Harness] Stop requested before turn injection, breaking.")
@@ -286,54 +290,31 @@ class EvaluationHarness:
                 await self.manifest.save_progress_async(collector.current_turn)
 
                 audio_path = utt["_audio_path"]
-                injection_task = asyncio.create_task(injector.inject_wav(audio_path))
+                if collector.current_turn:
+                    collector.current_turn.audio_input_path = audio_path
 
-                turn_timed_out = False
-                try:
-                    await asyncio.wait_for(collector.turn_completed_event.wait(), timeout=15.0)
-                except asyncio.TimeoutError:
-                    turn_timed_out = True
-                    logger.warning(
-                        f"[Harness] Timeout waiting for response completion on {utt_id}. "
-                        f"Sending InterruptionFrame to abort in-flight response."
-                    )
-                    # Tell the Pipecat realtime service to cancel the current
-                    # response so its tail frames don't leak into the next turn.
-                    try:
-                        await task.queue_frame(InterruptionFrame())
-                    except Exception as e:
-                        logger.error(f"[Harness] Failed to queue InterruptionFrame: {e}")
-                    collector.turn_completed_event.set()
-                    # Give the cancellation a moment to propagate downstream.
-                    await asyncio.sleep(1.0)
+                if pending_injection_task is not None:
+                    injection_task = pending_injection_task
+                    pending_injection_task = None
+                else:
+                    injection_task = asyncio.create_task(injector.inject_wav(audio_path))
 
-                # OpenAI Realtime emits FunctionCallInProgressFrame /
-                # FunctionCallResultFrame *after* LLMFullResponseEndFrame
-                # (Gemini Live emits them before). If the expect block declared
-                # a tool and we haven't seen the result yet, give the late
-                # frames a brief grace window so evaluate_turn doesn't read
-                # tool_call_details as None and falsely flag the turn.
-                expected_tool = (utt.get("expect") or {}).get("tool")
-                if (
-                    expected_tool
-                    and not turn_timed_out
-                    and not collector.tool_call_completed_event.is_set()
-                ):
-                    try:
-                        await asyncio.wait_for(
-                            collector.tool_call_completed_event.wait(), timeout=1.5
-                        )
-                        logger.debug(
-                            f"[Harness] Late tool-call frame arrived for {utt_id} "
-                            f"after LLMFullResponseEndFrame (OpenAI ordering)."
-                        )
-                    except asyncio.TimeoutError:
-                        logger.debug(
-                            f"[Harness] No late tool-call frame for {utt_id} within grace window."
-                        )
+                next_utt = utterances[i + 1] if i + 1 < len(utterances) else None
+                behavior_type = (
+                    (next_utt.get("behavior") or {}).get("type", "sequential")
+                    if next_utt else "sequential"
+                )
+                handler = BEHAVIOR_HANDLERS.get(behavior_type, handle_sequential)
 
-                injector.stop_injection()
-                await injection_task
+                ctx = TurnContext(
+                    task=task,
+                    injector=injector,
+                    collector=collector,
+                    manifest=self.manifest,
+                    utt=utt,
+                    utt_id=utt_id,
+                )
+                turn_timed_out, pending_injection_task = await handler(ctx, injection_task, next_utt)
 
                 if self.stop_requested:
                     logger.info("[Harness] Stop requested during turn wait, breaking.")
@@ -350,6 +331,14 @@ class EvaluationHarness:
                         )
 
                 collector.evaluate_turn()
+
+                if collector.current_turn and collector.current_turn.interruption_sent_at is not None:
+                    existing = collector.current_turn.evaluation_notes or ""
+                    suffix = "Interrupted by next turn (barge-in)."
+                    collector.current_turn.evaluation_notes = (
+                        f"{existing} {suffix}".strip() if existing else suffix
+                    )
+
                 await self.manifest.save_progress_async(collector.current_turn)
 
                 # Null current_turn so any straggler frames between turns are
@@ -421,6 +410,7 @@ class EvaluationHarness:
             if evaluated else None
         )
         hallucination_count = sum(t.hallucination_count or 0 for t in turns)
+        total_cost = sum(t.cost_usd for t in turns if t.cost_usd is not None)
 
         self.manifest.metrics = AggregateMetrics(
             total_turns=len(turns),
@@ -428,4 +418,5 @@ class EvaluationHarness:
             average_interruption_stop_latency_ms=avg_interruption,
             tool_call_accuracy_rate=tool_accuracy,
             hallucination_count=hallucination_count,
+            total_cost_usd=total_cost,
         )

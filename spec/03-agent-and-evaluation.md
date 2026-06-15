@@ -41,16 +41,61 @@ Example:
     args: { party_size: 6, time: "19:00" }
 ```
 
+### `behavior` (optional, per-utterance)
+
+Declares how the harness should drive this turn relative to the *previous*
+turn. Default is `"sequential"` (wait for the previous turn's response to
+fully complete before injecting this turn's audio).
+
+```yaml
+- id: u07
+  text: "Wait, actually, is The Bistro open on Mondays?"
+  behavior:
+    type: "barge_in"
+    delay_ms: 600   # start this turn's audio 600ms after the previous turn's bot starts speaking
+```
+
+`barge_in` causes `UserStartedSpeakingFrame` to be observed while the
+*previous* turn is still mid-response, so that turn's
+`interruption_sent_at`/`interruption_stopped_at`/
+`interruption_stop_latency_ms` get populated. If the previous turn's bot
+never starts speaking within a short window, the harness falls back to
+`sequential` for both turns.
+
+Adding a new `behavior.type` means adding a handler to
+`BEHAVIOR_HANDLERS` in `voxarena/turn_behaviors.py` — no changes to
+`voxarena/harness.py`'s drive loop.
+
+### `expect` schema
+
+- `tool` / `args` — expected tool call and (loosely-matched) arguments.
+  Absence of `tool` means "no tool call expected"; an unexpected call counts
+  as a hallucination.
+- `response_contains` — list of phrases the transcript must contain (skipped,
+  not failed, if the turn was cut short by a barge-in).
+- `interrupted` (bool) — asserts whether `interruption_sent_at` was recorded
+  for this turn. Used by the interrupted half of a barge-in pair.
+
+Each key is handled by an independent checker in `EXPECT_CHECKS`
+(`voxarena/evaluators.py`); unknown keys are ignored, so new check types are
+forward-compatible with old run data.
+
 ## Metrics
 
 Measure per turn and per run.
 
 - Time-to-first-audio
 - Tool-call accuracy
-- Interruption stop latency
-- Transcript fidelity
+- Interruption stop latency — exercised via `barge_in` utterances (see above)
+- Transcript fidelity — **future work** (Phase 8); `transcript_fidelity_score`
+  is currently always `null`
 - Hallucination count
-- Cost per conversation
+- Cost per conversation — via Pipecat usage-metrics frames
+  (`prompt_tokens`/`completion_tokens` per turn) and a flat per-model
+  $/token table in `voxarena/pricing.py`. This is a blended approximation
+  (audio vs. text tokens aren't broken out), good for relative provider
+  comparison, not exact billing reconciliation. `cost_usd` is `null` for
+  turns whose model has no pricing entry.
 
 ## Instrumentation Constraint
 

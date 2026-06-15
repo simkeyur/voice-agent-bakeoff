@@ -223,13 +223,71 @@ The harness plays `script/audio/{id}.wav` into the pipeline and scores the agent
 
 ## Configuration
 
+All settings can be edited from:
+- **UI:** Settings → Models → "Advanced: Evaluation & TTS"
+- **CLI:** `voxarena config list | get KEY | set KEY VALUE`
+- **`.env` file** in your workdir (loaded on startup)
+
+Values from environment variables win over the SQLite settings table, which wins over the in-code defaults below.
+
+### Provider models (realtime voice agents)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GOOGLE_API_KEY` / `OPENAI_API_KEY` | — | Provider credentials (also pickable in the UI Settings page) |
+| `GEMINI_MODEL` | `gemini-3.1-flash-live-preview` | Gemini Live model under test |
+| `OPENAI_MODEL` | `gpt-realtime-2` | OpenAI Realtime model under test |
+
+### Evaluation models (LLM-judge reviewer)
+
+Cheaper text-only models used after a run to score tool-call correctness and hallucinations. Independent from the live voice agent.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GEMINI_EVAL_MODEL` | `gemini-3.1-flash-lite` | Gemini judge model |
+| `OPENAI_EVAL_MODEL` | `gpt-5.4-mini` | OpenAI judge model |
+
+### TTS engine (utterance audio synthesis)
+
+Each scripted utterance is rendered into a WAV before being injected into the voice agent. The engine is chosen at run time; `auto` walks a fallback chain so you don't have to pre-configure anything.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TTS_ENGINE` | `auto` | One of `auto`, `openai`, `google`, `local`. `auto` chain (local-first): **local OS → OpenAI → Google**. So a fresh install with no API keys still works out of the box on macOS / Linux (with `espeak-ng`) / Windows. An explicit choice tries that engine first; if it isn't configured/available, the rest of the chain runs. |
+| `OPENAI_TTS_MODEL` | `tts-1` | Any OpenAI TTS model (`tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`, …). |
+| `OPENAI_TTS_VOICE` | `nova` | Any OpenAI voice (`nova`, `alloy`, `echo`, `fable`, `onyx`, `shimmer`). |
+| `GOOGLE_TTS_VOICE` | `en-US-Journey-F` | Any Google Cloud TTS voice name. |
+
+**Local OS engine** (no API keys needed):
+- **macOS** — built-in `say` command. Available out of the box.
+- **Linux** — `espeak-ng` (preferred) or `espeak` on PATH. Install with `apt install espeak-ng` (or `brew install espeak`).
+- **Windows** — PowerShell's `System.Speech.Synthesis.SpeechSynthesizer`. Available out of the box on modern Windows.
+
+Cache entries are signed by `engine+voice`, so switching between, say, `nova` and `alloy` produces a fresh WAV instead of returning stale audio.
+
+### Other
+
 | Variable | Description |
 | --- | --- |
-| `GOOGLE_API_KEY` / `OPENAI_API_KEY` | Provider credentials |
-| `GEMINI_MODEL` / `OPENAI_MODEL` | Realtime model under test |
-| `GEMINI_EVAL_MODEL` / `OPENAI_EVAL_MODEL` | Cheaper text models for grading |
-| `PORT` | FastAPI server port |
+| `PORT` | FastAPI server port (UI) |
 | `BASE_DIR` | Override workdir (CLI: `--workdir`) |
+
+### CLI examples
+
+```bash
+# Inspect everything
+voxarena config list
+
+# Force the local OS TTS so runs work offline
+voxarena config set TTS_ENGINE local
+
+# Try the higher-quality OpenAI voice
+voxarena config set OPENAI_TTS_MODEL tts-1-hd
+voxarena config set OPENAI_TTS_VOICE shimmer
+
+# Swap in a different evaluator model
+voxarena config set GEMINI_EVAL_MODEL gemini-2.5-flash
+```
 
 ## Contributing
 

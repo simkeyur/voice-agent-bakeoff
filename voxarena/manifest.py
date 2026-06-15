@@ -22,7 +22,12 @@ class TurnMetric(BaseModel):
     # Latencies
     time_to_first_audio_ms: Optional[float] = None
     interruption_stop_latency_ms: Optional[float] = None
-    
+
+    # Usage / cost
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    cost_usd: Optional[float] = None
+
     # Review scores
     tool_call_correct: Optional[bool] = None
     tool_call_details: Optional[Dict[str, Any]] = None
@@ -65,6 +70,12 @@ class RunManifest(BaseModel):
     
     # Path where this manifest file lives
     manifest_path: Optional[str] = None
+
+    # Path to a stitched WAV combining every user-input + bot-response segment
+    # at its real relative timing (left = user, right = bot, so barge-in
+    # overlap shows up audibly and in any waveform viewer). Populated at the
+    # end of run_session; None for failed runs.
+    stitched_audio_path: Optional[str] = None
 
     def save(self):
         """Synchronous save: writes JSON to disk and upserts into SQLite.

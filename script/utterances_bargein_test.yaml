@@ -1,0 +1,24 @@
+- id: u01
+  category: "greeting"
+  text: "Hi there."
+  expect: {}
+
+- id: u02
+  category: "constraint"
+  text: "Can I reserve a table for twenty people on Friday at eight PM?"
+  expect:
+    tool: "check_reservation_availability"
+    args: { party_size: 20, time: "20:00" }
+    response_contains: ["cannot accommodate", "larger than 12"]
+    interrupted: true
+
+- id: u03
+  category: "interruption"
+  text: "Wait, actually, is The Bistro open on Mondays?"
+  behavior:
+    type: "barge_in"
+    delay_ms: 600
+  expect:
+    tool: "get_hours"
+    args: { day: "monday" }
+    response_contains: ["closed"]
