@@ -13,3 +13,4 @@ results/
 voxarena/ui_dist/
 voxarena/default_script/
 *.egg-info/
+script/audio/*

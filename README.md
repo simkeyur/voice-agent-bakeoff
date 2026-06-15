@@ -97,6 +97,7 @@ This starts a local server and automatically opens the dashboard in your default
 From the UI, you can:
 - **Set Up API Keys:** Add and save Google Gemini and OpenAI API keys securely in the local database.
 - **Select Models:** Pick from preloaded Gemini and OpenAI realtime models, or write in your own custom model identifiers.
+- **Load Predefined Templates:** Select from built-in use-case templates (Restaurant, Telecom, Smart Home, Financial, Dry Run) to automatically populate agent system prompts, tool schemas, and utterances.
 - **Edit Test Utterances:** Create, edit, and delete turns in your test scripts using the interactive visual list editor (no raw YAML/JSON formatting needed).
 - **Run & Inspect:** Start live comparison runs and watch real-time transcripts, metrics, audio playbacks, and tool-call correctness side-by-side.
 
@@ -107,6 +108,7 @@ From the UI, you can:
 ## Features
 
 - 🎙️ **Provider-agnostic agent** — one Pipecat pipeline drives every provider; swap models without re-implementing your agent
+- 🎛️ **Predefined Use-Case Templates** — swap agent profiles (Restaurant, Telecom, Smart Home, Financial, Dry Run) to evaluate different prompts and tool sets dynamically
 - 🔁 **Scripted conversations** — multi-turn JSON or YAML scripts with pre-recorded WAV inputs and expected tool calls / response content
 - 📊 **Automated scoring** — tool-call correctness, response matching, hallucination counts, time-to-first-audio, interruption-stop latency
 - 🆚 **Side-by-side comparisons** — run multiple providers in parallel against the same script
@@ -143,12 +145,18 @@ Open the control panel at `http://localhost:5173`.
 
 ## Bring Your Own Agent
 
-The demo ships with the "Saffron Leaf" restaurant agent so you can run end-to-end on day one. To evaluate your own:
+VoxArena makes it easy to evaluate custom prompts, tools, and conversations:
 
-1. Replace the system prompt and tool schemas in `voxarena/agent.py`
-2. Implement (or stub) your tools in `voxarena/tools.py`
-3. Re-record `script/audio/*.wav` and update `script/utterances.yaml` to reflect your real workload
-4. Run the arena as normal — every provider gets scored against your scripts
+### 1. Using Built-In Templates
+The harness has preloaded templates (Restaurant, Telecom, Smart Home, Financial, Dry Run) containing predefined prompts, tool schemas, and conversations. You can load and run them instantly from the Web UI or by updating the template configuration database setting.
+
+### 2. Evaluating Your Custom Agent
+To benchmark your own proprietary voice agent:
+1. Define your own template within `TEMPLATES` in [`voxarena/templates.py`](voxarena/templates.py), or modify the legacy files on disk under the default fallback routing.
+2. Register and implement your mock tool execution callbacks inside [`voxarena/tools.py`](voxarena/tools.py) (matching your template name).
+3. Record raw `.wav` files for your test utterances and place them inside `script/audio/`.
+4. Define the target scripts in [`script/utterances.yaml`](script/utterances.yaml) with `expect` blocks containing correct tool calls, expected argument structures, and transcript string assertions.
+5. Run the arena as normal — every provider gets evaluated head-to-head on your custom agent configuration.
 
 ## Scripted Conversations
 

@@ -941,7 +941,7 @@
 
       <div class="diagram">
         <div class="diagram-title"><svg><use href="#i-workflow"/></svg>Pipeline architecture</div>
-        <svg viewBox="0 0 820 280" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 820 340" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" fill="currentColor" opacity="0.65"/>
@@ -951,43 +951,67 @@
             </marker>
           </defs>
 
+          <!-- Active Template configuration loaded on startup -->
+          <rect class="node" x="330" y="10" width="160" height="50" rx="8"/>
+          <text class="label" x="410" y="30" text-anchor="middle">Active Template</text>
+          <text class="sublabel" x="410" y="45" text-anchor="middle">Prompt + Tool Schemas</text>
+
           <!-- Row 1: Pipeline -->
-          <rect class="node" x="20"  y="80" width="130" height="56" rx="8"/>
-          <text class="label" x="85"  y="105" text-anchor="middle">Script utterance</text>
-          <text class="sublabel" x="85" y="123" text-anchor="middle">u01.wav · text</text>
+          <rect class="node" x="20"  y="95" width="130" height="56" rx="8"/>
+          <text class="label" x="85"  y="120" text-anchor="middle">Script utterance</text>
+          <text class="sublabel" x="85" y="138" text-anchor="middle">u01.wav · text</text>
 
-          <rect class="node" x="180" y="80" width="130" height="56" rx="8"/>
-          <text class="label" x="245" y="105" text-anchor="middle">Audio injector</text>
-          <text class="sublabel" x="245" y="123" text-anchor="middle">20ms PCM chunks</text>
+          <rect class="node" x="180" y="95" width="130" height="56" rx="8"/>
+          <text class="label" x="245" y="120" text-anchor="middle">Audio injector</text>
+          <text class="sublabel" x="245" y="138" text-anchor="middle">20ms PCM chunks</text>
 
-          <rect class="node-strong" x="340" y="80" width="140" height="56" rx="8"/>
-          <text class="label" x="410" y="105" text-anchor="middle">Realtime LLM</text>
-          <text class="sublabel" x="410" y="123" text-anchor="middle">Gemini · OpenAI</text>
+          <rect class="node-strong" x="340" y="95" width="140" height="56" rx="8"/>
+          <text class="label" x="410" y="120" text-anchor="middle">Realtime LLM</text>
+          <text class="sublabel" x="410" y="138" text-anchor="middle">Gemini · OpenAI</text>
 
-          <rect class="node" x="510" y="80" width="130" height="56" rx="8"/>
-          <text class="label" x="575" y="105" text-anchor="middle">Audio capture</text>
-          <text class="sublabel" x="575" y="123" text-anchor="middle">WAV per turn</text>
+          <rect class="node" x="510" y="95" width="130" height="56" rx="8"/>
+          <text class="label" x="575" y="120" text-anchor="middle">Audio capture</text>
+          <text class="sublabel" x="575" y="138" text-anchor="middle">WAV per turn</text>
 
-          <rect class="node" x="670" y="80" width="130" height="56" rx="8"/>
-          <text class="label" x="735" y="105" text-anchor="middle">Metrics collector</text>
-          <text class="sublabel" x="735" y="123" text-anchor="middle">TTFA · tools</text>
+          <rect class="node" x="670" y="95" width="130" height="56" rx="8"/>
+          <text class="label" x="735" y="120" text-anchor="middle">Metrics collector</text>
+          <text class="sublabel" x="735" y="138" text-anchor="middle">TTFA · tools</text>
 
-          <path class="edge" d="M150 108 L180 108"/>
-          <path class="edge" d="M310 108 L340 108"/>
-          <path class="edge-strong" d="M480 108 L510 108"/>
-          <path class="edge" d="M640 108 L670 108"/>
+          <path class="edge" d="M150 123 L180 123"/>
+          <path class="edge" d="M310 123 L340 123"/>
+          <path class="edge-strong" d="M480 123 L510 123"/>
+          <path class="edge" d="M640 123 L670 123"/>
+
+          <!-- Arrow from Template to LLM (Config Load) -->
+          <path class="edge" d="M410 60 L410 95"/>
+
+          <!-- Template-Aware Tools (Mock Execution Loop) -->
+          <rect class="node" x="330" y="185" width="160" height="50" rx="8"/>
+          <text class="label" x="410" y="205" text-anchor="middle">Template-Aware Tools</text>
+          <text class="sublabel" x="410" y="220" text-anchor="middle">mock_execute_{usecase}</text>
+
+          <!-- Bidirectional loop edges between LLM and Tools -->
+          <!-- Tool Call (Down) -->
+          <path class="edge" d="M390 151 L390 185"/>
+          <text style="font-size: 9px; fill: var(--fg-muted);" x="345" y="172">Tool Call</text>
+          <!-- Tool Result (Up) -->
+          <path class="edge" d="M430 185 L430 151"/>
+          <text style="font-size: 9px; fill: var(--fg-muted);" x="435" y="172">Response</text>
 
           <!-- Outputs -->
-          <rect class="node" x="280" y="200" width="140" height="56" rx="8"/>
-          <text class="label" x="350" y="225" text-anchor="middle">manifest.json</text>
-          <text class="sublabel" x="350" y="243" text-anchor="middle">disk · run dir</text>
+          <rect class="node" x="280" y="270" width="140" height="50" rx="8"/>
+          <text class="label" x="350" y="292" text-anchor="middle">manifest.json</text>
+          <text class="sublabel" x="350" y="307" text-anchor="middle">disk · run dir</text>
 
-          <rect class="node" x="450" y="200" width="140" height="56" rx="8"/>
-          <text class="label" x="520" y="225" text-anchor="middle">SQLite</text>
-          <text class="sublabel" x="520" y="243" text-anchor="middle">runs · turns · settings</text>
+          <rect class="node" x="450" y="270" width="140" height="50" rx="8"/>
+          <text class="label" x="520" y="292" text-anchor="middle">SQLite</text>
+          <text class="sublabel" x="520" y="307" text-anchor="middle">runs · turns · settings</text>
 
-          <path class="edge" d="M735 140 C 735 180, 590 180, 520 200"/>
-          <path class="edge" d="M735 140 C 735 180, 420 180, 350 200"/>
+          <path class="edge" d="M735 151 C 735 220, 590 230, 520 270"/>
+          <path class="edge" d="M735 151 C 735 220, 420 230, 350 270"/>
+
+          <!-- SQLite loads template configuration on startup -->
+          <path class="edge" stroke-dasharray="4" d="M520 270 C 520 180, 500 80, 490 50"/>
         </svg>
       </div>
 
