@@ -823,6 +823,115 @@
       pre code { font-size: 12px; padding: 14px 14px; }
       pre .pre-header { padding: 7px 12px; font-size: 11px; }
     }
+
+    /* Screenshot Carousel */
+    .screenshot-carousel {
+      margin: 32px 0;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    }
+    .carousel-container {
+      position: relative;
+      width: 100%;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #0a0e14;
+      border: 1px solid var(--border);
+    }
+    .carousel-track {
+      position: relative;
+      width: 100%;
+      height: 0;
+      padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+    }
+    .carousel-slide {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      transition: opacity 0.5s ease-in-out;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      pointer-events: none;
+    }
+    .carousel-slide.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .carousel-slide img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #0a0e14;
+    }
+    .carousel-caption {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(10, 14, 20, 0.85);
+      backdrop-filter: blur(8px);
+      padding: 12px 18px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--fg);
+      border-top: 1px solid var(--border);
+      text-align: center;
+      transition: transform 0.3s ease;
+    }
+    .carousel-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(10, 14, 20, 0.7);
+      backdrop-filter: blur(4px);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      font-size: 20px;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, transform 0.2s, color 0.2s;
+      z-index: 10;
+      outline: none;
+    }
+    .carousel-btn:hover {
+      background: var(--fg);
+      color: var(--bg);
+      transform: translateY(-50%) scale(1.08);
+      border-color: transparent;
+    }
+    .carousel-btn.prev { left: 16px; }
+    .carousel-btn.next { right: 16px; }
+    .carousel-dots {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .carousel-dots .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border-strong);
+      cursor: pointer;
+      transition: background 0.3s, transform 0.3s;
+    }
+    .carousel-dots .dot.active {
+      background: var(--fg);
+      transform: scale(1.25);
+    }
   </style>
 </head>
 <body>
@@ -1069,6 +1178,49 @@
         evaluation runtime. It's the right mode for exploratory work: tuning prompts, comparing
         providers head-to-head, and inspecting failed turns.
       </p>
+
+      <!-- App Screenshots Carousel -->
+      <div class="screenshot-carousel">
+        <div class="carousel-container">
+          <div class="carousel-track">
+            <div class="carousel-slide active">
+              <img src="app-screenshots/screenshot_1.png" alt="Arena Dashboard" />
+              <div class="carousel-caption">Dashboard - Monitor comparative voice aggregates and run history.</div>
+            </div>
+            <div class="carousel-slide">
+              <img src="app-screenshots/screenshot_2.png" alt="Launch Benchmark Run" />
+              <div class="carousel-caption">Configure Run - Select models, use-case templates, and transport layers.</div>
+            </div>
+            <div class="carousel-slide">
+              <img src="app-screenshots/screenshot_3.png" alt="Live Telemetry & Logs" />
+              <div class="carousel-caption">Live Telemetry - Track pipeline execution progress and logs in real-time.</div>
+            </div>
+            <div class="carousel-slide">
+              <img src="app-screenshots/screenshot_4.png" alt="Completed Run Details" />
+              <div class="carousel-caption">Inspect Run - Deep-dive into turn-by-turn transcripts, waveforms, and audio playbacks.</div>
+            </div>
+            <div class="carousel-slide">
+              <img src="app-screenshots/screenshot_5.png" alt="Side-by-Side Run Comparison" />
+              <div class="carousel-caption">Side-by-Side Comparison - Align and compare provider results head-to-head.</div>
+            </div>
+            <div class="carousel-slide">
+              <img src="app-screenshots/screenshot_6.png" alt="Interactive Script Editor" />
+              <div class="carousel-caption">Script Editor - Interactively modify conversation scripts and parameters.</div>
+            </div>
+          </div>
+          
+          <button class="carousel-btn prev" aria-label="Previous screenshot">❬</button>
+          <button class="carousel-btn next" aria-label="Next screenshot">❭</button>
+        </div>
+        <div class="carousel-dots">
+          <span class="dot active" data-index="0"></span>
+          <span class="dot" data-index="1"></span>
+          <span class="dot" data-index="2"></span>
+          <span class="dot" data-index="3"></span>
+          <span class="dot" data-index="4"></span>
+          <span class="dot" data-index="5"></span>
+        </div>
+      </div>
 
       <div class="diagram">
         <div class="diagram-title"><svg><use href="#i-workflow"/></svg>Control panel flow</div>
@@ -1674,6 +1826,67 @@ register_adapter("my-provider", MyProviderAdapter, api_key_env="MY_PROVIDER_API_
     copyText($('cmd-copy'), $('cmd-preview').textContent.replace(/\\\n\s*/g, ' '));
   });
   updateCommand();
+
+  // ---------- Screenshot Carousel ----------
+  const slides = document.querySelectorAll('.carousel-slide');
+  const dots = document.querySelectorAll('.carousel-dots .dot');
+  const prevBtn = document.querySelector('.carousel-btn.prev');
+  const nextBtn = document.querySelector('.carousel-btn.next');
+  let currentSlide = 0;
+  let autoplayInterval;
+
+  function showSlide(index) {
+    if (index >= slides.length) currentSlide = 0;
+    else if (index < 0) currentSlide = slides.length - 1;
+    else currentSlide = index;
+
+    slides.forEach((slide, idx) => {
+      slide.classList.toggle('active', idx === currentSlide);
+    });
+    dots.forEach((dot, idx) => {
+      dot.classList.toggle('active', idx === currentSlide);
+    });
+  }
+
+  function nextSlide() {
+    showSlide(currentSlide + 1);
+  }
+
+  function startAutoplay() {
+    stopAutoplay();
+    autoplayInterval = setInterval(nextSlide, 5000);
+  }
+
+  function stopAutoplay() {
+    if (autoplayInterval) clearInterval(autoplayInterval);
+  }
+
+  if (prevBtn && nextBtn) {
+    prevBtn.addEventListener('click', () => {
+      showSlide(currentSlide - 1);
+      startAutoplay(); // Reset autoplay timer
+    });
+    nextBtn.addEventListener('click', () => {
+      showSlide(currentSlide + 1);
+      startAutoplay(); // Reset autoplay timer
+    });
+    dots.forEach(dot => {
+      dot.addEventListener('click', () => {
+        showSlide(parseInt(dot.dataset.index));
+        startAutoplay(); // Reset autoplay timer
+      });
+    });
+
+    // Start autoplay
+    startAutoplay();
+
+    // Pause on hover
+    const carouselEl = document.querySelector('.screenshot-carousel');
+    if (carouselEl) {
+      carouselEl.addEventListener('mouseenter', stopAutoplay);
+      carouselEl.addEventListener('mouseleave', startAutoplay);
+    }
+  }
 </script>
 </body>
 </html>
