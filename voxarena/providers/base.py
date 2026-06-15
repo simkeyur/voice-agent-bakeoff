@@ -60,6 +60,10 @@ class RunMetricsCollector(FrameProcessor):
         self.last_bot_speaking_state = False
         self.turn_completed_event = asyncio.Event()
         self.bot_started_speaking_event = asyncio.Event()
+        # Fires on FunctionCallResultFrame so the harness can wait for late
+        # tool-call frames (OpenAI Realtime emits the function-call event
+        # *after* LLMFullResponseEndFrame, unlike Gemini Live).
+        self.tool_call_completed_event = asyncio.Event()
         self.current_expect: Dict[str, Any] = {}
 
     def on_input_injected(self, utterance_id: str, text: str, expect: Optional[Dict[str, Any]] = None):
@@ -67,6 +71,7 @@ class RunMetricsCollector(FrameProcessor):
         now_ms = time.time() * 1000.0
         self.turn_completed_event.clear()
         self.bot_started_speaking_event.clear()
+        self.tool_call_completed_event.clear()
         self.current_expect = expect or {}
 
         self.current_turn = TurnMetric(
@@ -150,6 +155,9 @@ class RunMetricsCollector(FrameProcessor):
                 self.current_turn.tool_call_details["result_received_at"] = now_ms
                 self.current_turn.tool_call_details["latency_ms"] = now_ms - call_at
                 logger.debug(f"[MetricsCollector] Tool call resolved in {now_ms - call_at:.2f} ms")
+            # Wake the harness even when current_turn is None — but the harness
+            # also reads current_turn before deciding what to do.
+            self.tool_call_completed_event.set()
 
         # 3. Capture Bot Output Audio (First Audio response)
         elif isinstance(frame, (OutputAudioRawFrame, BotStartedSpeakingFrame)):

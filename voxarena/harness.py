@@ -307,6 +307,31 @@ class EvaluationHarness:
                     # Give the cancellation a moment to propagate downstream.
                     await asyncio.sleep(1.0)
 
+                # OpenAI Realtime emits FunctionCallInProgressFrame /
+                # FunctionCallResultFrame *after* LLMFullResponseEndFrame
+                # (Gemini Live emits them before). If the expect block declared
+                # a tool and we haven't seen the result yet, give the late
+                # frames a brief grace window so evaluate_turn doesn't read
+                # tool_call_details as None and falsely flag the turn.
+                expected_tool = (utt.get("expect") or {}).get("tool")
+                if (
+                    expected_tool
+                    and not turn_timed_out
+                    and not collector.tool_call_completed_event.is_set()
+                ):
+                    try:
+                        await asyncio.wait_for(
+                            collector.tool_call_completed_event.wait(), timeout=1.5
+                        )
+                        logger.debug(
+                            f"[Harness] Late tool-call frame arrived for {utt_id} "
+                            f"after LLMFullResponseEndFrame (OpenAI ordering)."
+                        )
+                    except asyncio.TimeoutError:
+                        logger.debug(
+                            f"[Harness] No late tool-call frame for {utt_id} within grace window."
+                        )
+
                 injector.stop_injection()
                 await injection_task
 
