@@ -881,18 +881,18 @@
       padding: 12px 18px;
       font-size: 13.5px;
       font-weight: 500;
-      color: var(--fg);
-      border-top: 1px solid var(--border);
+      color: #f0f6fc;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
       text-align: center;
       transition: transform 0.3s ease;
     }
-    .carousel-btn {
+     .carousel-btn {
       position: absolute;
       top: 50%;
       transform: translateY(-50%);
-      background: rgba(10, 14, 20, 0.7);
-      backdrop-filter: blur(4px);
-      border: 1px solid var(--border);
+      background: var(--surface-2);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border-strong);
       color: var(--fg);
       font-size: 20px;
       width: 42px;
@@ -905,6 +905,7 @@
       transition: background 0.2s, transform 0.2s, color 0.2s;
       z-index: 10;
       outline: none;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
     }
     .carousel-btn:hover {
       background: var(--fg);
@@ -938,9 +939,9 @@
       position: absolute;
       top: 16px;
       right: 16px;
-      background: rgba(10, 14, 20, 0.7);
-      backdrop-filter: blur(4px);
-      border: 1px solid var(--border);
+      background: var(--surface-2);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border-strong);
       color: var(--fg);
       width: 38px;
       height: 38px;
@@ -952,6 +953,7 @@
       transition: background 0.2s, transform 0.2s, color 0.2s;
       z-index: 12;
       outline: none;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
     }
     .carousel-maximize-btn:hover {
       background: var(--fg);
