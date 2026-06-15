@@ -189,7 +189,11 @@ class RunMetricsCollector(FrameProcessor):
             if self.current_turn:
                 self.current_turn.audio_completed_received_at = now_ms
                 logger.info(f"[MetricsCollector] Turn {self.current_turn.utterance_id} response completed.")
-            self.turn_completed_event.set()
+                self.turn_completed_event.set()
+            else:
+                # Late end-frame from an abandoned turn — discard so it can't
+                # wake up the next turn's wait_for or pollute its metrics.
+                logger.debug("[MetricsCollector] Discarded stray LLMFullResponseEndFrame (no current turn).")
 
         # Continue propagating the frame
         await super().process_frame(frame, direction)

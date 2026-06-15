@@ -288,11 +288,24 @@ class EvaluationHarness:
                 audio_path = utt["_audio_path"]
                 injection_task = asyncio.create_task(injector.inject_wav(audio_path))
 
+                turn_timed_out = False
                 try:
                     await asyncio.wait_for(collector.turn_completed_event.wait(), timeout=15.0)
                 except asyncio.TimeoutError:
-                    logger.warning(f"[Harness] Timeout waiting for response completion on {utt_id}.")
+                    turn_timed_out = True
+                    logger.warning(
+                        f"[Harness] Timeout waiting for response completion on {utt_id}. "
+                        f"Sending InterruptionFrame to abort in-flight response."
+                    )
+                    # Tell the Pipecat realtime service to cancel the current
+                    # response so its tail frames don't leak into the next turn.
+                    try:
+                        await task.queue_frame(InterruptionFrame())
+                    except Exception as e:
+                        logger.error(f"[Harness] Failed to queue InterruptionFrame: {e}")
                     collector.turn_completed_event.set()
+                    # Give the cancellation a moment to propagate downstream.
+                    await asyncio.sleep(1.0)
 
                 injector.stop_injection()
                 await injection_task
@@ -304,9 +317,22 @@ class EvaluationHarness:
                 saved_audio = capture.save_turn_audio()
                 if collector.current_turn:
                     collector.current_turn.audio_output_path = saved_audio
+                    if turn_timed_out:
+                        existing = collector.current_turn.evaluation_notes or ""
+                        suffix = "Response timed out after 15s; tail frames discarded."
+                        collector.current_turn.evaluation_notes = (
+                            f"{existing} {suffix}".strip() if existing else suffix
+                        )
 
                 collector.evaluate_turn()
                 await self.manifest.save_progress_async(collector.current_turn)
+
+                # Null current_turn so any straggler frames between turns are
+                # ignored (they have no valid turn to attribute to). The next
+                # turn's on_input_injected will set it again.
+                collector.current_turn = None
+                collector.last_bot_speaking_state = False
+
                 await asyncio.sleep(2.0)
 
         timed_out = False
