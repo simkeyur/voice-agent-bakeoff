@@ -154,9 +154,16 @@ class RunMetricsCollector(FrameProcessor):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self.last_bot_speaking_state = False
             if self.current_turn and self.current_turn.interruption_sent_at and not self.current_turn.interruption_stopped_at:
-                self.current_turn.interruption_stopped_at = now_ms
-                self.current_turn.interruption_stop_latency_ms = now_ms - self.current_turn.interruption_sent_at
-                logger.info(f"[MetricsCollector] Bot stopped speaking after interruption in {self.current_turn.interruption_stop_latency_ms:.2f} ms")
+                delta = now_ms - self.current_turn.interruption_sent_at
+                if delta < 0:
+                    logger.debug(
+                        f"[MetricsCollector] BotStoppedSpeakingFrame predates interruption "
+                        f"by {-delta:.0f}ms; skipping stop-latency record."
+                    )
+                else:
+                    self.current_turn.interruption_stopped_at = now_ms
+                    self.current_turn.interruption_stop_latency_ms = delta
+                    logger.info(f"[MetricsCollector] Bot stopped speaking after interruption in {delta:.2f} ms")
 
         # 5. Capture bot transcript text
         # Gemini Live pushes both an LLMTextFrame and a TTSTextFrame
