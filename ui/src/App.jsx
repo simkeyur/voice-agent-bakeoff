@@ -253,105 +253,160 @@ function LivePipelineVisualizer({ activeStep }) {
   );
 }
 
-// Custom responsive SVG comparative bar chart
-function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter = true, decimals = 0, unitPrefix = '' }) {
-  const maxValue = Math.max(geminiValue || 0, openaiValue || 0) || 100;
-  const geminiPercent = geminiValue ? (geminiValue / maxValue) * 100 : 0;
-  const openaiPercent = openaiValue ? (openaiValue / maxValue) * 100 : 0;
+// Modernized Head-to-Head Metric Visualization
+function MetricComparison({ title, geminiValue, openaiValue, unit, decimals = 0, unitPrefix = '', lowerIsBetter = true, isPercentage = false }) {
+  const hasG = geminiValue != null;
+  const hasO = openaiValue != null;
   
-  const isGeminiWinner = lowerIsBetter ? (geminiValue < openaiValue) : (geminiValue > openaiValue);
-  const showWinner = geminiValue && openaiValue && (geminiValue !== openaiValue);
+  const isTie = hasG && hasO && Math.abs(geminiValue - openaiValue) < 0.0001;
+  const isGeminiWinner = !isTie && hasG && (!hasO || (lowerIsBetter ? (geminiValue < openaiValue) : (geminiValue > openaiValue)));
+  const isOpenaiWinner = !isTie && hasO && (!hasG || (lowerIsBetter ? (openaiValue < geminiValue) : (openaiValue > geminiValue)));
   
+  const showStats = hasG || hasO;
+  const showWinner = (isGeminiWinner || isOpenaiWinner) && hasG && hasO; // Only show lead if both have data and one is better
+
+  // For percentages, scale is always 0-100. For others, it's relative.
+  let scaleMax = 100;
+  if (!isPercentage) {
+    const maxVal = Math.max(Math.abs(geminiValue || 0), Math.abs(openaiValue || 0));
+    scaleMax = maxVal > 0 ? maxVal * 1.2 : 100;
+  }
+
+  const getPercent = (val) => (val != null ? (Math.abs(val) / scaleMax) * 100 : 0);
+  const gPercent = getPercent(geminiValue);
+  const oPercent = getPercent(openaiValue);
+
+  const formatValue = (val) => {
+    if (val == null) return 'No data';
+    return `${unitPrefix}${val.toFixed(decimals)}${unit}`;
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
+    <div className="metric-comparison-row" style={{ padding: '4px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--fg)' }}>{title}</span>
-        {showWinner && (
-          <span style={{ 
-            fontSize: 10, 
-            fontWeight: 700, 
-            color: 'var(--success)', 
-            background: 'rgba(16, 185, 129, 0.08)', 
-            padding: '2px 8px', 
-            borderRadius: '12px',
-            border: '1px solid rgba(16, 185, 129, 0.15)'
-          }}>
-            {isGeminiWinner ? 'Gemini leading' : 'OpenAI leading'}
-          </span>
-        )}
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {title}
+        </span>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {isTie && (
+            <span style={{ 
+              fontSize: 9, 
+              fontWeight: 800, 
+              color: 'var(--muted)', 
+              background: 'var(--muted-light)', 
+              padding: '2px 8px', 
+              borderRadius: '10px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              border: '1px solid var(--border)'
+            }}>
+              Tied
+            </span>
+          )}
+          {!isTie && showStats && (
+            <span style={{ 
+              fontSize: 9, 
+              fontWeight: 800, 
+              color: 'var(--success)', 
+              background: 'rgba(16, 185, 129, 0.08)', 
+              padding: '2px 8px', 
+              borderRadius: '10px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              border: '1px solid rgba(16, 185, 129, 0.12)'
+            }}>
+              {isGeminiWinner ? 'Gemini Leads' : 'OpenAI Leads'}
+            </span>
+          )}
+        </div>
       </div>
-      
-      <svg viewBox="0 0 400 110" style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
-        <defs>
-          <linearGradient id="geminiGrad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#4f46e5" />
-            <stop offset="100%" stopColor="#6366f1" />
-          </linearGradient>
-          <linearGradient id="openaiGrad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#0891b2" />
-            <stop offset="100%" stopColor="#06b6d4" />
-          </linearGradient>
-        </defs>
-        
-        {/* Background Grid Lines */}
-        <line x1="80" y1="10" x2="380" y2="10" stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
-        <line x1="80" y1="55" x2="380" y2="55" stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
-        <line x1="80" y1="100" x2="380" y2="100" stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
-        
-        {/* Gemini Bar */}
-        <text x="0" y="32" fill="var(--fg)" fontSize="11" fontWeight="600">GEMINI</text>
-        {geminiValue ? (
-          <>
-            <rect 
-              x="80" 
-              y="16" 
-              width={Math.max(12, (geminiPercent / 100) * 300)} 
-              height="20" 
-              rx="10" 
-              fill="url(#geminiGrad)" 
-            />
-            <text 
-              x={Math.max(105, 80 + (geminiPercent / 100) * 300 - 8)} 
-              y="30" 
-              fill="#fff" 
-              fontSize="10" 
-              fontWeight="700" 
-              textAnchor="end"
-            >
-              {unitPrefix}{geminiValue.toFixed(decimals)}{unit}
-            </text>
-          </>
-        ) : (
-          <text x="80" y="32" fill="var(--muted)" fontSize="11">No data</text>
-        )}
-        
-        {/* OpenAI Bar */}
-        <text x="0" y="77" fill="var(--fg)" fontSize="11" fontWeight="600">OPENAI</text>
-        {openaiValue ? (
-          <>
-            <rect 
-              x="80" 
-              y="61" 
-              width={Math.max(12, (openaiPercent / 100) * 300)} 
-              height="20" 
-              rx="10" 
-              fill="url(#openaiGrad)" 
-            />
-            <text 
-              x={Math.max(105, 80 + (openaiPercent / 100) * 300 - 8)} 
-              y="75" 
-              fill="#fff" 
-              fontSize="10" 
-              fontWeight="700" 
-              textAnchor="end"
-            >
-              {unitPrefix}{openaiValue.toFixed(decimals)}{unit}
-            </text>
-          </>
-        ) : (
-          <text x="80" y="77" fill="var(--muted)" fontSize="11">No data</text>
-        )}
-      </svg>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {/* Gemini Panel */}
+        <div style={{ 
+          background: 'var(--muted-light)', 
+          borderRadius: 8, 
+          padding: '10px 12px',
+          border: '1px solid var(--border)',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6, position: 'relative', zIndex: 2 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>Gemini</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>{formatValue(geminiValue)}</span>
+          </div>
+          <div style={{ height: 4, background: 'rgba(0,0,0,0.05)', borderRadius: 2, position: 'relative', zIndex: 2 }}>
+            {geminiValue != null && (
+              <div style={{ 
+                width: `${Math.max(2, gPercent)}%`, 
+                height: '100%', 
+                background: 'var(--color-primary)', 
+                borderRadius: 2,
+                boxShadow: '0 0 8px rgba(99, 102, 241, 0.3)'
+              }} />
+            )}
+          </div>
+          {/* Subtle background glow if winner */}
+          {showWinner && isGeminiWinner && (
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.03) 0%, transparent 100%)', zIndex: 1 }} />
+          )}
+        </div>
+
+        {/* OpenAI Panel */}
+        <div style={{ 
+          background: 'var(--muted-light)', 
+          borderRadius: 8, 
+          padding: '10px 12px',
+          border: '1px solid var(--border)',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6, position: 'relative', zIndex: 2 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>OpenAI</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>{formatValue(openaiValue)}</span>
+          </div>
+          <div style={{ height: 4, background: 'rgba(0,0,0,0.05)', borderRadius: 2, position: 'relative', zIndex: 2 }}>
+            {openaiValue != null && (
+              <div style={{ 
+                width: `${Math.max(2, oPercent)}%`, 
+                height: '100%', 
+                background: 'var(--color-secondary)', 
+                borderRadius: 2,
+                boxShadow: '0 0 8px rgba(6, 182, 212, 0.3)'
+              }} />
+            )}
+          </div>
+          {showWinner && !isGeminiWinner && (
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.03) 0%, transparent 100%)', zIndex: 1 }} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Minimalist Stat Highlight for Dashboard Header
+function SummaryStat({ label, value, subValue, icon: Icon, color }) {
+  return (
+    <div className="summary-stat-card" style={{ 
+      background: 'var(--glass-bg)', 
+      backdropFilter: 'blur(8px)',
+      border: '1px solid var(--border)',
+      borderRadius: 12,
+      padding: '16px 20px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
+      flex: 1
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+        {Icon && <Icon size={16} style={{ color: color || 'var(--color-primary)' }} />}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span style={{ fontSize: 24, fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.02em' }}>{value}</span>
+        {subValue && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{subValue}</span>}
+      </div>
     </div>
   );
 }
@@ -1466,22 +1521,35 @@ function App() {
           const geminiStats = getAggregates('gemini');
           const openaiStats = getAggregates('openai');
           const hasStats = geminiStats || openaiStats;
+          
+          const totalRuns = completedRuns.length;
+          const totalHallucinations = (geminiStats?.totalHallucinations || 0) + (openaiStats?.totalHallucinations || 0);
 
           return (
-            <div className="scrollable-tab-container">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div className="scrollable-tab-container dashboard-v2">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, padding: '4px 0' }}>
                 <div>
-                  <h2 style={{ fontSize: 18, fontWeight: 700 }}>Arena Dashboard</h2>
-                  <p style={{ color: 'var(--muted)', fontSize: 13 }}>Comparative aggregates of all benchmark runs</p>
+                  <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em' }}>Arena Dashboard</h2>
+                  <p style={{ color: 'var(--muted)', fontSize: 13 }}>Across-the-board provider performance metrics</p>
                 </div>
-                <button 
-                  className="btn btn-primary" 
-                  onClick={() => setIsNewRunModalOpen(true)}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                >
-                  <Plus size={16} />
-                  <span>Start New Run</span>
-                </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button 
+                    className="btn" 
+                    onClick={() => setActiveTab('runs')}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px' }}
+                  >
+                    <History size={16} />
+                    <span>Past Runs</span>
+                  </button>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={() => setIsNewRunModalOpen(true)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)' }}
+                  >
+                    <Plus size={18} />
+                    <span>New Run</span>
+                  </button>
+                </div>
               </div>
 
               {!hasStats ? (
@@ -1489,9 +1557,13 @@ function App() {
                   <div className="card-header">
                     <span className="card-title">Welcome to VoxArena</span>
                   </div>
-                  <div className="card-body" style={{ textAlign: 'center', padding: '40px 0' }}>
-                    <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
-                      No completed benchmark runs found. Let's start by launching your first test!
+                  <div className="card-body" style={{ textAlign: 'center', padding: '60px 0' }}>
+                    <div style={{ background: 'var(--muted-light)', width: 64, height: 64, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+                      <LayoutDashboard size={32} style={{ color: 'var(--muted)' }} />
+                    </div>
+                    <h3 style={{ fontSize: 18, marginBottom: 8 }}>No data yet</h3>
+                    <p style={{ color: 'var(--muted)', marginBottom: 24, maxWidth: 300, margin: '0 auto 24px' }}>
+                      Launch your first benchmark runs to see comparative performance metrics here.
                     </p>
                     <button className="btn btn-primary" onClick={() => setIsNewRunModalOpen(true)}>
                       Start Your First Run
@@ -1499,92 +1571,134 @@ function App() {
                   </div>
                 </div>
               ) : (
-                <div>
-                  <div className="grid-4" style={{ marginBottom: 16 }}>
-                    <div className="card">
-                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><CloudLightning size={16} style={{ color: 'var(--color-primary)' }} />Latency Showdown (TTFA)</span></div>
-                      <div className="card-body">
-                        <CustomBarChart 
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                  {/* Executive Summary Row */}
+                  <div className="summary-row" style={{ display: 'flex', gap: 16 }}>
+                    <SummaryStat 
+                      label="Total Benchmark Runs" 
+                      value={totalRuns} 
+                      icon={BarChart3} 
+                    />
+                    <SummaryStat 
+                      label="Best Response Delay" 
+                      value={Math.min(geminiStats?.avgTtfa || Infinity, openaiStats?.avgTtfa || Infinity).toFixed(0)} 
+                      subValue="ms avg"
+                      icon={CloudLightning} 
+                      color="var(--success)"
+                    />
+                    <SummaryStat 
+                      label="Global Accuracy" 
+                      value={(((geminiStats?.avgAccuracy || 0) + (openaiStats?.avgAccuracy || 0)) / (geminiStats && openaiStats ? 2 : 1)).toFixed(1)} 
+                      subValue="% average"
+                      icon={ClipboardCheck} 
+                    />
+                    <SummaryStat 
+                      label="Total Hallucinations" 
+                      value={totalHallucinations} 
+                      icon={ShieldAlert}
+                      color={totalHallucinations > 0 ? "var(--error)" : "var(--success)"}
+                    />
+                  </div>
+
+                  {/* Core Metrics Grid */}
+                  <div className="grid-2">
+                    <div className="card metric-group-card">
+                      <div className="card-header" style={{ border: 'none', background: 'transparent', paddingBottom: 0 }}>
+                        <span className="card-title" style={{ color: 'var(--muted)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Performance Comparison</span>
+                      </div>
+                      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                        <MetricComparison 
                           geminiValue={geminiStats?.avgTtfa} 
                           openaiValue={openaiStats?.avgTtfa} 
-                          title="Average Response Delay" 
+                          title="Latency (TTFA)" 
                           unit="ms" 
                           lowerIsBetter={true} 
                         />
-                        <div className="metric-label" style={{ marginTop: 12 }}>Lower is better. Measures transport delay to first audio response.</div>
-                      </div>
-                    </div>
-
-                    <div className="card">
-                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ClipboardCheck size={16} style={{ color: 'var(--color-primary)' }} />Tool-Call Accuracy</span></div>
-                      <div className="card-body">
-                        <CustomBarChart 
+                        <div style={{ height: 1, background: 'var(--border)', opacity: 0.5 }}></div>
+                        <MetricComparison 
                           geminiValue={geminiStats?.avgAccuracy} 
                           openaiValue={openaiStats?.avgAccuracy} 
-                          title="Tool Accuracy Rate" 
+                          title="Tool-Call Accuracy" 
                           unit="%" 
                           lowerIsBetter={false} 
+                          isPercentage={true}
                         />
-                        <div className="metric-label" style={{ marginTop: 12 }}>Higher is better. Percentage of correct tool calls.</div>
                       </div>
                     </div>
 
-                    <div className="card">
-                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><AudioLines size={16} style={{ color: 'var(--color-primary)' }} />Interruption Stop Latency</span></div>
-                      <div className="card-body">
-                        <CustomBarChart 
+                    <div className="card metric-group-card">
+                      <div className="card-header" style={{ border: 'none', background: 'transparent', paddingBottom: 0 }}>
+                        <span className="card-title" style={{ color: 'var(--muted)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Interaction Quality</span>
+                      </div>
+                      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                        <MetricComparison 
                           geminiValue={geminiStats?.avgInterruption} 
                           openaiValue={openaiStats?.avgInterruption} 
-                          title="Average Interruption Stop Delay" 
+                          title="Barge In Latency" 
                           unit="ms" 
                           lowerIsBetter={true} 
                         />
-                        <div className="metric-label" style={{ marginTop: 12 }}>Lower is better. Time taken to stop speaking upon user interruption.</div>
-                      </div>
-                    </div>
-
-                    <div className="card">
-                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><DollarSign size={16} style={{ color: 'var(--color-primary)' }} />Cost per Run</span></div>
-                      <div className="card-body">
-                        <CustomBarChart
+                        <div style={{ height: 1, background: 'var(--border)', opacity: 0.5 }}></div>
+                        <MetricComparison
                           geminiValue={geminiStats?.avgCost}
                           openaiValue={openaiStats?.avgCost}
-                          title="Average Estimated Cost"
+                          title="Average Run Cost"
                           unit=""
                           unitPrefix="$"
                           decimals={4}
                           lowerIsBetter={true}
                         />
-                        <div className="metric-label" style={{ marginTop: 12 }}>Lower is better. Estimated token cost per run from provider usage metrics.</div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid-2" style={{ marginBottom: 16 }}>
+                  <div className="grid-2" style={{ alignItems: 'start' }}>
                     <div className="card">
-                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><AlertCircle size={16} style={{ color: 'var(--color-primary)' }} />Fact Hallucinations</span></div>
-                      <div className="card-body">
-                        <table className="runs-table" style={{ margin: 0 }}>
-                          <thead>
+                      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="card-title">Fact Hallucinations by Provider</span>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {geminiStats && openaiStats && (
+                            <span style={{ 
+                              fontSize: 9, 
+                              fontWeight: 800, 
+                              color: 'var(--success)', 
+                              background: 'rgba(16, 185, 129, 0.08)', 
+                              padding: '2px 8px', 
+                              borderRadius: '10px',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.04em',
+                              border: '1px solid rgba(16, 185, 129, 0.12)'
+                            }}>
+                              {(geminiStats.totalHallucinations / geminiStats.runCount) < (openaiStats.totalHallucinations / openaiStats.runCount) ? 'Gemini Leads' : 'OpenAI Leads'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="card-body" style={{ padding: 0 }}>
+                        <table className="runs-table" style={{ margin: 0, border: 'none' }}>
+                          <thead style={{ background: 'var(--accent-light)' }}>
                             <tr>
-                              <th>Provider</th>
-                              <th>Experiment Runs</th>
-                              <th>Total Hallucinations</th>
+                              <th style={{ padding: '12px 16px' }}>Provider</th>
+                              <th style={{ padding: '12px 16px' }}>Completed Runs</th>
+                              <th style={{ padding: '12px 16px' }}>Total Hallucinations</th>
+                              <th style={{ padding: '12px 16px' }}>Rate</th>
                             </tr>
                           </thead>
                           <tbody>
                             {geminiStats && (
                               <tr>
-                                <td>GEMINI</td>
-                                <td>{geminiStats.runCount}</td>
-                                <td>{geminiStats.totalHallucinations}</td>
+                                <td style={{ padding: '12px 16px', fontWeight: 600 }}>GEMINI</td>
+                                <td style={{ padding: '12px 16px' }}>{geminiStats.runCount}</td>
+                                <td style={{ padding: '12px 16px' }}>{geminiStats.totalHallucinations}</td>
+                                <td style={{ padding: '12px 16px' }}>{(geminiStats.totalHallucinations / geminiStats.runCount).toFixed(2)} / run</td>
                               </tr>
                             )}
                             {openaiStats && (
                               <tr>
-                                <td>OPENAI</td>
-                                <td>{openaiStats.runCount}</td>
-                                <td>{openaiStats.totalHallucinations}</td>
+                                <td style={{ padding: '12px 16px', fontWeight: 600 }}>OPENAI</td>
+                                <td style={{ padding: '12px 16px' }}>{openaiStats.runCount}</td>
+                                <td style={{ padding: '12px 16px' }}>{openaiStats.totalHallucinations}</td>
+                                <td style={{ padding: '12px 16px' }}>{(openaiStats.totalHallucinations / openaiStats.runCount).toFixed(2)} / run</td>
                               </tr>
                             )}
                           </tbody>
@@ -1593,32 +1707,47 @@ function App() {
                     </div>
 
                     <div className="card">
-                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><History size={16} style={{ color: 'var(--color-primary)' }} />Recent Run Log</span></div>
-                      <div className="card-body" style={{ overflowY: 'auto', maxHeight: '180px', padding: 0 }}>
-                        <table className="runs-table" style={{ margin: 0 }}>
-                          <thead>
-                            <tr>
-                              <th>Run ID</th>
-                              <th>Model</th>
-                              <th>Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {runs.slice(0, 5).map(r => (
-                              <tr 
-                                key={r.run_id} 
-                                style={{ cursor: 'pointer' }}
-                                onClick={() => { window.location.hash = `#/runs/inspect/${r.run_id}`; }}
-                              >
-                                <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{r.run_id.slice(0, 12)}...</td>
-                                <td>{r.model}</td>
-                                <td>
-                                  <span className={`status-badge ${r.status}`}>{r.status}</span>
-                                </td>
+                      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span className="card-title">Recent Run Log</span>
+                        <button 
+                          variant="ghost" 
+                          onClick={() => setActiveTab('runs')}
+                          style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          View all runs
+                        </button>
+                      </div>
+                      <div className="card-body" style={{ padding: 0 }}>
+                        <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                          <table className="runs-table" style={{ margin: 0, border: 'none' }}>
+                            <thead>
+                              <tr style={{ background: 'var(--accent-light)' }}>
+                                <th style={{ padding: '10px 16px' }}>Run ID</th>
+                                <th style={{ padding: '10px 16px' }}>Model</th>
+                                <th style={{ padding: '10px 16px' }}>Executed</th>
+                                <th style={{ padding: '10px 16px' }}>Status</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {runs.slice(0, 8).map(r => (
+                                <tr 
+                                  key={r.run_id} 
+                                  style={{ cursor: 'pointer' }}
+                                  onClick={() => { window.location.hash = `#/runs/inspect/${r.run_id}`; setSelectedRunId(r.run_id); }}
+                                >
+                                  <td style={{ padding: '10px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>{r.run_id.slice(0, 8)}...</td>
+                                  <td style={{ padding: '10px 16px', fontSize: 12 }}>{r.model}</td>
+                                  <td style={{ padding: '10px 16px', fontSize: 11, color: 'var(--muted)' }}>
+                                    {r.created_at ? new Date(r.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                  </td>
+                                  <td style={{ padding: '10px 16px' }}>
+                                    <span className={`status-badge ${r.status}`} style={{ fontSize: 10 }}>{r.status}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     </div>
                   </div>
