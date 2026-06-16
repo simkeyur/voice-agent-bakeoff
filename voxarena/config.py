@@ -52,8 +52,17 @@ class AppSettings(BaseSettings):
     # Voice agent models (must be live/realtime-capable)
     GEMINI_MODEL: str = "gemini-3.1-flash-live-preview"
     OPENAI_MODEL: str = "gpt-realtime-2"
-    GEMINI_EVAL_MODEL: str = "gemini-3.1-flash-lite"
-    OPENAI_EVAL_MODEL: str = "gpt-5.4-mini"
+    EVALUATION_MODEL: str = "gemini-3.1-flash-lite"
+    EVALUATION_PROVIDER: str = "gemini"
+
+    # TTS configuration for synthesizing user-utterance audio.
+    # Engine: "auto" follows the fallback chain (openai > google > local). Explicit
+    # choices force that engine — they still fall back if unavailable, but try the
+    # preferred one first.
+    TTS_ENGINE: Literal["auto", "openai", "google", "local"] = "local"
+    OPENAI_TTS_MODEL: str = "tts-1"
+    OPENAI_TTS_VOICE: str = "nova"
+    GOOGLE_TTS_VOICE: str = "en-US-Journey-F"
     
     # Directory paths
     BASE_DIR: str = default_base_dir

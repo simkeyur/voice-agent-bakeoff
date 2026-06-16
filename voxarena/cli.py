@@ -298,6 +298,81 @@ def cmd_ui(args) -> int:
     return 0
 
 
+CONFIGURABLE_KEYS = [
+    "GOOGLE_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_MODEL",
+    "OPENAI_MODEL",
+    "EVALUATION_MODEL",
+    "EVALUATION_PROVIDER",
+    "TTS_ENGINE",
+    "OPENAI_TTS_MODEL",
+    "OPENAI_TTS_VOICE",
+    "GOOGLE_TTS_VOICE",
+]
+
+SECRET_KEYS = {"GOOGLE_API_KEY", "OPENAI_API_KEY"}
+
+
+def cmd_config(args) -> int:
+    """Get / set / list VoxArena settings from the CLI."""
+    _apply_workdir(args.workdir)
+    from voxarena.config import get_setting, set_setting, settings
+
+    action = args.action
+
+    if action == "list":
+        rows = []
+        for key in CONFIGURABLE_KEYS:
+            value = get_setting(key) or getattr(settings, key, None) or ""
+            if key in SECRET_KEYS and value:
+                value = value[:4] + "…" + value[-4:] if len(value) > 8 else "••••"
+            rows.append((key, value))
+        width = max(len(k) for k, _ in rows)
+        for k, v in rows:
+            print(f"{k.ljust(width)}  {v}")
+        return 0
+
+    if action == "get":
+        if not args.key:
+            print("error: `config get` requires KEY", file=sys.stderr)
+            return 2
+        key = args.key.upper()
+        value = get_setting(key) or getattr(settings, key, None) or ""
+        if key in SECRET_KEYS and value:
+            value = value[:4] + "…" + value[-4:] if len(value) > 8 else "••••"
+        print(value)
+        return 0
+
+    if action == "set":
+        if not args.key or args.value is None:
+            print("error: `config set` requires KEY VALUE", file=sys.stderr)
+            return 2
+        key = args.key.upper()
+        if key not in CONFIGURABLE_KEYS:
+            print(
+                f"error: '{key}' is not a configurable key. Known keys:\n  "
+                + "\n  ".join(CONFIGURABLE_KEYS),
+                file=sys.stderr,
+            )
+            return 2
+        if key == "TTS_ENGINE" and args.value not in ("auto", "openai", "google", "local"):
+            print(
+                f"error: TTS_ENGINE must be one of: auto, openai, google, local (got '{args.value}')",
+                file=sys.stderr,
+            )
+            return 2
+        set_setting(key, args.value)
+        display = args.value
+        if key in SECRET_KEYS:
+            display = "•••• (saved)"
+        print(f"{key} = {display}")
+        return 0
+
+    print(f"error: unknown config action '{action}'", file=sys.stderr)
+    return 2
+
+
 def _add_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--transport", default="direct-injection",
                         choices=["direct-injection", "webrtc-local"])
@@ -365,6 +440,24 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--workdir", default=None,
                     help="Project workdir containing script/ and results/ (default: cwd).")
     ui.set_defaults(func=cmd_ui)
+
+    cfg = sub.add_parser("config",
+                         help="View or modify VoxArena settings (API keys, models, TTS).")
+    cfg.add_argument("--workdir", default=None,
+                     help="Project workdir containing the settings DB (default: cwd).")
+    cfg_sub = cfg.add_subparsers(dest="action", required=True)
+
+    cfg_list = cfg_sub.add_parser("list", help="Print every configurable key and its current value.")
+    cfg_list.set_defaults(func=cmd_config)
+
+    cfg_get = cfg_sub.add_parser("get", help="Print the value of one setting.")
+    cfg_get.add_argument("key", help=f"One of: {', '.join(CONFIGURABLE_KEYS)}")
+    cfg_get.set_defaults(func=cmd_config)
+
+    cfg_set = cfg_sub.add_parser("set", help="Write a setting to the local SQLite settings table.")
+    cfg_set.add_argument("key", help=f"One of: {', '.join(CONFIGURABLE_KEYS)}")
+    cfg_set.add_argument("value", help="The new value.")
+    cfg_set.set_defaults(func=cmd_config)
 
     return parser
 

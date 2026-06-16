@@ -228,6 +228,12 @@ a {
   gap: 6px;
 }
 
+.grid-4 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 6px;
+}
+
 .card {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1030,16 +1036,14 @@ a {
 }
 
 .modal-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: 12px 16px 4px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: var(--accent-light);
 }
 
 .modal-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -1057,7 +1061,7 @@ a {
 }
 
 .modal-body {
-  padding: 16px;
+  padding: 4px 16px 16px 16px;
 }
 
 .modal-body .form-label,
@@ -1077,6 +1081,49 @@ a {
   }
 }
 
+/* Modern Checkbox Style */
+.modern-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+  background-color: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  outline: none;
+}
 
+.modern-checkbox:checked {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
 
+.modern-checkbox:checked::after {
+  content: '';
+  width: 4px;
+  height: 8px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  margin-bottom: 2px;
+}
 
+.modern-checkbox:focus-visible {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.modern-checkbox:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.modern-checkbox:hover:not(:disabled) {
+  border-color: var(--fg);
+}

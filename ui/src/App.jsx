@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Sun, Moon, Play, Pause, BarChart3, History, Settings, 
   Mic, CloudLightning, AudioLines, ClipboardCheck, ArrowRightLeft, 
   Trash2, CheckCircle2, XCircle, AlertCircle, ArrowLeft,
-  ChevronLeft, ChevronRight, LayoutDashboard, Plus
+  ChevronLeft, ChevronRight, LayoutDashboard, Plus, Cpu, MessageSquare, ShieldAlert, GitCompare,
+  DollarSign, Key, Volume2
 } from 'lucide-react';
 import logoUrl from './assets/logo.png';
 import './App.css';
@@ -253,7 +254,7 @@ function LivePipelineVisualizer({ activeStep }) {
 }
 
 // Custom responsive SVG comparative bar chart
-function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter = true }) {
+function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter = true, decimals = 0, unitPrefix = '' }) {
   const maxValue = Math.max(geminiValue || 0, openaiValue || 0) || 100;
   const geminiPercent = geminiValue ? (geminiValue / maxValue) * 100 : 0;
   const openaiPercent = openaiValue ? (openaiValue / maxValue) * 100 : 0;
@@ -317,7 +318,7 @@ function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter =
               fontWeight="700" 
               textAnchor="end"
             >
-              {geminiValue.toFixed(0)}{unit}
+              {unitPrefix}{geminiValue.toFixed(decimals)}{unit}
             </text>
           </>
         ) : (
@@ -344,7 +345,7 @@ function CustomBarChart({ geminiValue, openaiValue, title, unit, lowerIsBetter =
               fontWeight="700" 
               textAnchor="end"
             >
-              {openaiValue.toFixed(0)}{unit}
+              {unitPrefix}{openaiValue.toFixed(decimals)}{unit}
             </text>
           </>
         ) : (
@@ -400,6 +401,22 @@ function App() {
   const [openaiModelCustom, setOpenaiModelCustom] = useState('');
   const [geminiSaveMsg, setGeminiSaveMsg] = useState('');
   const [openaiSaveMsg, setOpenaiSaveMsg] = useState('');
+  // Evaluation model (used by the LLM-judge evaluator)
+  const [evaluationModel, setEvaluationModel] = useState('gemini-3.1-flash-lite');
+  const [evaluationProvider, setEvaluationProvider] = useState('gemini');
+  const [evaluationModelSelect, setEvaluationModelSelect] = useState('gemini-3.1-flash-lite');
+  const [evaluationModelCustom, setEvaluationModelCustom] = useState('');
+  // Sub-tab within Model Configuration
+  const [modelConfigSubTab, setModelConfigSubTab] = useState('api_keys');
+  // TTS configuration for synthesizing user-utterance audio
+  const [ttsEngine, setTtsEngine] = useState('local');
+  const [openaiTtsModel, setOpenaiTtsModel] = useState('tts-1');
+  const [openaiTtsVoice, setOpenaiTtsVoice] = useState('nova');
+  const [googleTtsVoice, setGoogleTtsVoice] = useState('en-US-Journey-F');
+  const [googleTtsVoiceSelect, setGoogleTtsVoiceSelect] = useState('en-US-Journey-F');
+  const [googleTtsVoiceCustom, setGoogleTtsVoiceCustom] = useState('');
+  const [ttsEngineAvailable, setTtsEngineAvailable] = useState({ openai: false, google: false, local: false });
+  const [advancedSaveMsg, setAdvancedSaveMsg] = useState('');
   const [settingsUtterances, setSettingsUtterances] = useState([]);
   const [rawArgsState, setRawArgsState] = useState({});
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -418,6 +435,27 @@ function App() {
   const [compareSelection, setCompareSelection] = useState([]);
   const [activeComparison, setActiveComparison] = useState(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
+
+  // Modal for adding a new utterance
+  const [isAddUtteranceModalOpen, setIsAddUtteranceModalOpen] = useState(false);
+  const [newUtteranceId, setNewUtteranceId] = useState('');
+  const [newUtteranceText, setNewUtteranceText] = useState('');
+  const [newUtteranceExpectType, setNewUtteranceExpectType] = useState('none');
+  const [newUtterancePhrases, setNewUtterancePhrases] = useState('');
+  const [newUtteranceTool, setNewUtteranceTool] = useState('');
+  const [newUtteranceArgs, setNewUtteranceArgs] = useState('');
+
+  // Runs table search & sorting
+  const [runsSearchQuery, setRunsSearchQuery] = useState('');
+  const [runsSortField, setRunsSortField] = useState('created_at');
+  const [runsSortDirection, setRunsSortDirection] = useState('desc');
+
+  // Settings sub-tab navigation
+  const [settingsSubTab, setSettingsSubTab] = useState('models');
+  const [modelProviderTab, setModelProviderTab] = useState('gemini');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [confirmModalConfig, setConfirmModalConfig] = useState(null);
+
 
   const selectedRunIdRef = useRef(null);
   const activeComparisonRef = useRef(null);
@@ -548,6 +586,12 @@ function App() {
       .catch((err) => console.error('Error fetching utterances:', err));
   }, []);
 
+  useEffect(() => {
+    if (backendConfig?.active_template) {
+      setSelectedTemplateId(backendConfig.active_template);
+    }
+  }, [backendConfig]);
+
   const [runningId, setRunningId] = useState(null);
   const [runStatus, setRunStatus] = useState(null);
   const [logs, setLogs] = useState([
@@ -631,17 +675,25 @@ function App() {
   };
 
   const pollCompareStatus = (geminiRunId, openaiRunId) => {
+    // Snapshot the run-id pair this poll is for; if the user navigates away
+    // (activeComparison changes or compareRunIds is cleared) we stop polling.
+    const pairKey = `${geminiRunId}::${openaiRunId}`;
     Promise.all([
       fetch(`${backendUrl}/api/runs/${geminiRunId}`).then((res) => res.json()),
       fetch(`${backendUrl}/api/runs/${openaiRunId}`).then((res) => res.json())
     ])
       .then(([geminiData, openaiData]) => {
+        const active = activeComparisonRef.current;
+        const stillOnSamePair =
+          active &&
+          active.run1.run_id === geminiRunId &&
+          active.run2.run_id === openaiRunId;
+
         const isDone = (d) => d.status === 'completed' || d.status === 'failed';
         const summarize = (label, d) => `${label}: ${d.status?.toUpperCase()} (turns: ${d.turns ? d.turns.length : 0})`;
         addLog(`${summarize('Gemini', geminiData)} | ${summarize('OpenAI', openaiData)}`);
 
-        if (activeComparisonRef.current && 
-            (activeComparisonRef.current.run1.run_id === geminiRunId && activeComparisonRef.current.run2.run_id === openaiRunId)) {
+        if (stillOnSamePair) {
           setActiveComparison({ run1: geminiData, run2: openaiData });
         }
 
@@ -652,8 +704,11 @@ function App() {
           fetch(`${backendUrl}/api/runs`)
             .then((res) => res.json())
             .then((d) => setRuns(d));
-        } else {
+        } else if (stillOnSamePair) {
+          // Only re-arm the poll if the user is still on this comparison.
           setTimeout(() => pollCompareStatus(geminiRunId, openaiRunId), 2000);
+        } else {
+          addLog(`Stopped polling ${pairKey} (user navigated away).`);
         }
       })
       .catch((err) => {
@@ -778,6 +833,13 @@ function App() {
         setSettingsGoogleApiKey(settingsData.google_api_key || '');
         setSettingsOpenaiApiKey(settingsData.openai_api_key || '');
 
+        if (settingsData.google_api_key === '••••••••') {
+          setGeminiVerifiedStatus({ success: true, message: 'Google Gemini API key verified (previously saved).' });
+        }
+        if (settingsData.openai_api_key === '••••••••') {
+          setOpenaiVerifiedStatus({ success: true, message: 'OpenAI API key verified (previously saved).' });
+        }
+
         const gModel = settingsData.gemini_model || '';
         if (gModel === '' || ['gemini-3.1-flash-live-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-8b', 'gemini-2.0-flash-exp'].includes(gModel)) {
           setGeminiModelSelect(gModel || 'gemini-3.1-flash-live-preview');
@@ -796,6 +858,44 @@ function App() {
           setOpenaiModelCustom(oModel);
         }
 
+        // Advanced: evaluation model + TTS
+        const evalProv = settingsData.evaluation_provider || 'gemini';
+        setEvaluationProvider(evalProv);
+        const evalModel = settingsData.evaluation_model || '';
+        setEvaluationModel(evalModel);
+        if (evalProv === 'gemini') {
+          if (evalModel === '' || ['gemini-3.1-flash-lite', 'gemini-2.5-flash'].includes(evalModel)) {
+            setEvaluationModelSelect(evalModel || 'gemini-3.1-flash-lite');
+            setEvaluationModelCustom('');
+          } else {
+            setEvaluationModelSelect('custom');
+            setEvaluationModelCustom(evalModel);
+          }
+        } else {
+          if (evalModel === '' || ['gpt-4o-mini', 'gpt-4o'].includes(evalModel)) {
+            setEvaluationModelSelect(evalModel || 'gpt-4o-mini');
+            setEvaluationModelCustom('');
+          } else {
+            setEvaluationModelSelect('custom');
+            setEvaluationModelCustom(evalModel);
+          }
+        }
+        if (settingsData.tts_engine) setTtsEngine(settingsData.tts_engine);
+        if (settingsData.openai_tts_model) setOpenaiTtsModel(settingsData.openai_tts_model);
+        if (settingsData.openai_tts_voice) setOpenaiTtsVoice(settingsData.openai_tts_voice);
+        if (settingsData.google_tts_voice) {
+          const gVoice = settingsData.google_tts_voice;
+          setGoogleTtsVoice(gVoice);
+          if (['en-US-Journey-F', 'en-US-Journey-D', 'en-US-Wavenet-F', 'en-US-Wavenet-D', 'en-US-Neutral-A', 'en-US-News-K'].includes(gVoice)) {
+            setGoogleTtsVoiceSelect(gVoice);
+            setGoogleTtsVoiceCustom('');
+          } else {
+            setGoogleTtsVoiceSelect('custom');
+            setGoogleTtsVoiceCustom(gVoice);
+          }
+        }
+        if (settingsData.tts_engine_available) setTtsEngineAvailable(settingsData.tts_engine_available);
+
         const rawArgs = {};
         if (Array.isArray(utterancesData)) {
           utterancesData.forEach((u, idx) => {
@@ -809,6 +909,68 @@ function App() {
       })
       .catch((err) => console.error('Error loading settings:', err));
   }, [activeTab, settingsLoaded]);
+
+  useEffect(() => {
+    if (backendConfig?.active_template) {
+      setSelectedTemplateId(backendConfig.active_template);
+    }
+  }, [backendConfig]);
+
+  const handleSaveEvaluationSettings = () => {
+    setAdvancedSaveMsg('Saving...');
+    const geminiModel = geminiModelSelect === 'custom' ? geminiModelCustom : geminiModelSelect;
+    const openaiModel = openaiModelSelect === 'custom' ? openaiModelCustom : openaiModelSelect;
+    const evalModel = evaluationModelSelect === 'custom' ? evaluationModelCustom : evaluationModelSelect;
+    fetch(`${backendUrl}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gemini_model: geminiModel,
+        openai_model: openaiModel,
+        evaluation_model: evalModel,
+        evaluation_provider: evaluationProvider,
+      })
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to save evaluation settings');
+        return res.json();
+      })
+      .then(() => {
+        setEvaluationModel(evalModel);
+        setAdvancedSaveMsg('Saved.');
+        setTimeout(() => setAdvancedSaveMsg(''), 2000);
+      })
+      .catch((err) => setAdvancedSaveMsg(`Error: ${err.message}`));
+  };
+
+  const handleSaveTtsSettings = () => {
+    setAdvancedSaveMsg('Saving...');
+    const geminiModel = geminiModelSelect === 'custom' ? geminiModelCustom : geminiModelSelect;
+    const openaiModel = openaiModelSelect === 'custom' ? openaiModelCustom : openaiModelSelect;
+    const gVoice = googleTtsVoiceSelect === 'custom' ? googleTtsVoiceCustom : googleTtsVoiceSelect;
+    fetch(`${backendUrl}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gemini_model: geminiModel,
+        openai_model: openaiModel,
+        tts_engine: ttsEngine,
+        openai_tts_model: openaiTtsModel,
+        openai_tts_voice: openaiTtsVoice,
+        google_tts_voice: gVoice,
+      })
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to save TTS settings');
+        return res.json();
+      })
+      .then(() => {
+        setGoogleTtsVoice(gVoice);
+        setAdvancedSaveMsg('Saved.');
+        setTimeout(() => setAdvancedSaveMsg(''), 2000);
+      })
+      .catch((err) => setAdvancedSaveMsg(`Error: ${err.message}`));
+  };
 
   const handleSaveModelSettings = (provider) => {
     const isGemini = provider === 'gemini';
@@ -834,6 +996,11 @@ function App() {
       })
       .then(() => {
         setMsg('Saved.');
+        if (provider === 'gemini') {
+          setGeminiVerifiedStatus({ success: true, message: 'Google Gemini API key saved & active.' });
+        } else {
+          setOpenaiVerifiedStatus({ success: true, message: 'OpenAI API key saved & active.' });
+        }
         fetch(`${backendUrl}/api/status`)
           .then((res) => res.json())
           .then((cfg) => setBackendConfig(cfg))
@@ -868,10 +1035,19 @@ function App() {
   };
 
   const handleLoadTemplate = (templateId) => {
-    if (settingsUtterances.length > 0 && !window.confirm('Loading a template will overwrite your current scripted utterances. Continue?')) {
-      return;
+    if (settingsUtterances.length > 0) {
+      setConfirmModalConfig({
+        title: 'Overwrite scripted utterances?',
+        message: 'Loading a template will overwrite your current scripted test utterances. Are you sure you want to continue?',
+        isDanger: false,
+        onConfirm: () => executeLoadTemplate(templateId)
+      });
+    } else {
+      executeLoadTemplate(templateId);
     }
-    
+  };
+
+  const executeLoadTemplate = (templateId) => {
     setUtterancesSaveMsg('Loading template...');
     fetch(`${backendUrl}/api/templates/${templateId}/load`, {
       method: 'POST'
@@ -957,10 +1133,22 @@ function App() {
     if (type === 'none') {
       const { expect, ...rest } = current;
       updated[index] = rest;
-    } else if (type === 'response') {
-      updated[index] = { ...current, expect: { response: current.expect?.response || '' } };
+    } else if (type === 'phrases') {
+      // response_contains: list of substrings — promote a legacy response string if present
+      const existing = Array.isArray(current.expect?.response_contains)
+        ? current.expect.response_contains
+        : (current.expect?.response ? [current.expect.response] : []);
+      updated[index] = { ...current, expect: { response_contains: existing } };
     } else if (type === 'tool') {
-      updated[index] = { ...current, expect: { tool: current.expect?.tool || '', args: current.expect?.args || {} } };
+      updated[index] = {
+        ...current,
+        expect: {
+          tool: current.expect?.tool || '',
+          args: current.expect?.args || {},
+          // preserve response_contains across type switch if user already had one
+          ...(Array.isArray(current.expect?.response_contains) ? { response_contains: current.expect.response_contains } : {}),
+        },
+      };
     }
     setSettingsUtterances(updated);
   };
@@ -978,6 +1166,31 @@ function App() {
     setSettingsUtterances(updated);
   };
 
+  const updateUtteranceBehavior = (index, type) => {
+    const updated = [...settingsUtterances];
+    const current = updated[index];
+    if (type === 'sequential') {
+      const { behavior, ...rest } = current;
+      updated[index] = rest;
+    } else {
+      updated[index] = {
+        ...current,
+        behavior: { type, delay_ms: current.behavior?.delay_ms ?? 600 },
+      };
+    }
+    setSettingsUtterances(updated);
+  };
+
+  const updateUtteranceBehaviorField = (index, field, value) => {
+    const updated = [...settingsUtterances];
+    const current = updated[index];
+    updated[index] = {
+      ...current,
+      behavior: { ...current.behavior, [field]: value },
+    };
+    setSettingsUtterances(updated);
+  };
+
   const handleArgsChange = (index, textValue) => {
     setRawArgsState((prev) => ({ ...prev, [index]: textValue }));
     try {
@@ -989,10 +1202,15 @@ function App() {
   };
 
   const handleDeleteRun = (runId) => {
-    if (!window.confirm('Are you sure you want to permanently delete this experiment run?')) {
-      return;
-    }
-    
+    setConfirmModalConfig({
+      title: 'Delete Experiment Run?',
+      message: 'Are you sure you want to permanently delete this experiment run? This will delete all transcripts, metrics, and audio files from disk. This cannot be undone.',
+      isDanger: true,
+      onConfirm: () => executeDeleteRun(runId)
+    });
+  };
+
+  const executeDeleteRun = (runId) => {
     fetch(`${backendUrl}/api/runs/${runId}`, {
       method: 'DELETE'
     })
@@ -1016,11 +1234,62 @@ function App() {
       });
   };
 
-  const handleResetDatabase = () => {
-    if (!window.confirm('This will permanently delete ALL run history, transcripts, and audio from disk and reset the database. This cannot be undone. Continue?')) {
-      return;
+  const handleSortRuns = (field) => {
+    if (runsSortField === field) {
+      setRunsSortDirection(runsSortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setRunsSortField(field);
+      setRunsSortDirection(field === 'created_at' ? 'desc' : 'asc');
+    }
+  };
+
+  const filteredAndSortedRuns = useMemo(() => {
+    let result = [...runs];
+    if (runsSearchQuery.trim()) {
+      const q = runsSearchQuery.toLowerCase();
+      result = result.filter((run) => {
+        return (
+          (run.run_id && run.run_id.toLowerCase().includes(q)) ||
+          (run.provider && run.provider.toLowerCase().includes(q)) ||
+          (run.model && run.model.toLowerCase().includes(q)) ||
+          (run.transport && run.transport.toLowerCase().includes(q)) ||
+          (run.status && run.status.toLowerCase().includes(q))
+        );
+      });
     }
 
+    if (runsSortField) {
+      result.sort((a, b) => {
+        let valA = a[runsSortField];
+        let valB = b[runsSortField];
+
+        if (typeof valA === 'string') {
+          valA = valA.toLowerCase();
+          valB = (valB || '').toLowerCase();
+        } else if (valA == null) {
+          valA = 0;
+          valB = valB || 0;
+        }
+
+        if (valA < valB) return runsSortDirection === 'asc' ? -1 : 1;
+        if (valA > valB) return runsSortDirection === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  }, [runs, runsSearchQuery, runsSortField, runsSortDirection]);
+
+  const handleResetDatabase = () => {
+    setConfirmModalConfig({
+      title: 'Reset All Data?',
+      message: 'This will permanently delete ALL run history, transcripts, and audio from disk and reset the SQLite database. This action cannot be undone. Continue?',
+      isDanger: true,
+      onConfirm: () => executeResetDatabase()
+    });
+  };
+
+  const executeResetDatabase = () => {
     setResetMsg('Resetting...');
     fetch(`${backendUrl}/api/database/reset`, { method: 'POST' })
       .then((res) => {
@@ -1082,7 +1351,7 @@ function App() {
           <div className="api-status">
             <span className={`status-dot ${backendStatus === 'connected' ? 'connected' : 'disconnected'}`}></span>
             <span style={{ color: 'var(--muted)', fontSize: 13 }}>
-              {backendStatus === 'connected' ? 'API connected' : 'API disconnected'}
+              {backendStatus === 'connected' ? 'System Online' : 'System Offline'}
             </span>
           </div>
           <button
@@ -1180,12 +1449,14 @@ function App() {
             const accuracies = pRuns.map(r => r.aggregate_metrics?.tool_call_accuracy_rate).filter(v => v != null);
             const interruptions = pRuns.map(r => r.aggregate_metrics?.average_interruption_stop_latency_ms).filter(v => v != null);
             const hallucinations = pRuns.map(r => r.aggregate_metrics?.hallucination_count || 0);
-            
+            const costs = pRuns.map(r => r.aggregate_metrics?.total_cost_usd).filter(v => v != null);
+
             return {
               avgTtfa: ttfas.length ? sum(ttfas) / ttfas.length : null,
               avgAccuracy: accuracies.length ? (sum(accuracies) / accuracies.length) * 100 : null,
               avgInterruption: interruptions.length ? sum(interruptions) / interruptions.length : null,
               totalHallucinations: sum(hallucinations),
+              avgCost: costs.length ? sum(costs) / costs.length : null,
               runCount: pRuns.length
             };
           };
@@ -1229,9 +1500,9 @@ function App() {
                 </div>
               ) : (
                 <div>
-                  <div className="grid-3" style={{ marginBottom: 16 }}>
+                  <div className="grid-4" style={{ marginBottom: 16 }}>
                     <div className="card">
-                      <div className="card-header"><span className="card-title">Latency Showdown (TTFA)</span></div>
+                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><CloudLightning size={16} style={{ color: 'var(--color-primary)' }} />Latency Showdown (TTFA)</span></div>
                       <div className="card-body">
                         <CustomBarChart 
                           geminiValue={geminiStats?.avgTtfa} 
@@ -1245,7 +1516,7 @@ function App() {
                     </div>
 
                     <div className="card">
-                      <div className="card-header"><span className="card-title">Tool-Call Accuracy</span></div>
+                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ClipboardCheck size={16} style={{ color: 'var(--color-primary)' }} />Tool-Call Accuracy</span></div>
                       <div className="card-body">
                         <CustomBarChart 
                           geminiValue={geminiStats?.avgAccuracy} 
@@ -1259,7 +1530,7 @@ function App() {
                     </div>
 
                     <div className="card">
-                      <div className="card-header"><span className="card-title">Interruption Stop Latency</span></div>
+                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><AudioLines size={16} style={{ color: 'var(--color-primary)' }} />Interruption Stop Latency</span></div>
                       <div className="card-body">
                         <CustomBarChart 
                           geminiValue={geminiStats?.avgInterruption} 
@@ -1271,11 +1542,27 @@ function App() {
                         <div className="metric-label" style={{ marginTop: 12 }}>Lower is better. Time taken to stop speaking upon user interruption.</div>
                       </div>
                     </div>
+
+                    <div className="card">
+                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><DollarSign size={16} style={{ color: 'var(--color-primary)' }} />Cost per Run</span></div>
+                      <div className="card-body">
+                        <CustomBarChart
+                          geminiValue={geminiStats?.avgCost}
+                          openaiValue={openaiStats?.avgCost}
+                          title="Average Estimated Cost"
+                          unit=""
+                          unitPrefix="$"
+                          decimals={4}
+                          lowerIsBetter={true}
+                        />
+                        <div className="metric-label" style={{ marginTop: 12 }}>Lower is better. Estimated token cost per run from provider usage metrics.</div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="grid-2" style={{ marginBottom: 16 }}>
                     <div className="card">
-                      <div className="card-header"><span className="card-title">Fact Hallucinations</span></div>
+                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><AlertCircle size={16} style={{ color: 'var(--color-primary)' }} />Fact Hallucinations</span></div>
                       <div className="card-body">
                         <table className="runs-table" style={{ margin: 0 }}>
                           <thead>
@@ -1306,7 +1593,7 @@ function App() {
                     </div>
 
                     <div className="card">
-                      <div className="card-header"><span className="card-title">Recent Run Log</span></div>
+                      <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><History size={16} style={{ color: 'var(--color-primary)' }} />Recent Run Log</span></div>
                       <div className="card-body" style={{ overflowY: 'auto', maxHeight: '180px', padding: 0 }}>
                         <table className="runs-table" style={{ margin: 0 }}>
                           <thead>
@@ -1352,176 +1639,194 @@ function App() {
                 </div>
               </div>
             ) : activeComparison ? (
-              // Side-by-side Comparison View
+              // Side-by-side Comparison View — subtle redesign:
+              //  - dynamic provider labels (no hardcoded GEMINI / OPENAI)
+              //  - winner highlight on metrics instead of colored borders
+              //  - status pill alone (no 3px colored border per turn)
+              //  - collapsible Live Logs panel
+              (() => {
+                const r1 = activeComparison.run1;
+                const r2 = activeComparison.run2;
+                const m1 = r1.metrics || {};
+                const m2 = r2.metrics || {};
+
+                // Lower TTFA wins. Higher accuracy wins. Lower hallucinations win.
+                const ttfaWinner = (m1.average_ttfa_ms != null && m2.average_ttfa_ms != null)
+                  ? (m1.average_ttfa_ms < m2.average_ttfa_ms ? r1.run_id : (m2.average_ttfa_ms < m1.average_ttfa_ms ? r2.run_id : null))
+                  : null;
+                const accWinner = (m1.tool_call_accuracy_rate != null && m2.tool_call_accuracy_rate != null)
+                  ? (m1.tool_call_accuracy_rate > m2.tool_call_accuracy_rate ? r1.run_id : (m2.tool_call_accuracy_rate > m1.tool_call_accuracy_rate ? r2.run_id : null))
+                  : null;
+                const hallWinner = ((m1.hallucination_count ?? 0) < (m2.hallucination_count ?? 0))
+                  ? r1.run_id
+                  : ((m2.hallucination_count ?? 0) < (m1.hallucination_count ?? 0) ? r2.run_id : null);
+                const costWinner = (m1.total_cost_usd != null && m2.total_cost_usd != null)
+                  ? (m1.total_cost_usd < m2.total_cost_usd ? r1.run_id : (m2.total_cost_usd < m1.total_cost_usd ? r2.run_id : null))
+                  : null;
+
+                const ttfaDelta = (m1.average_ttfa_ms != null && m2.average_ttfa_ms != null)
+                  ? Math.abs(m1.average_ttfa_ms - m2.average_ttfa_ms).toFixed(0)
+                  : null;
+
+                const Metric = ({ label, value, isWinner, tone, delta }) => {
+                  const color = tone === 'error' ? 'var(--error)' : (isWinner ? 'var(--fg)' : 'var(--muted)');
+                  return (
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
+                        <span style={{ fontWeight: isWinner ? 700 : 500, fontSize: 16, fontFamily: 'var(--font-mono)', color }}>
+                          {value}
+                        </span>
+                        {delta && (
+                          <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{delta}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                };
+
+                const SummaryCard = ({ run, winners }) => {
+                  const m = run.metrics || {};
+                  const isTtfaW = winners.ttfa === run.run_id;
+                  const isAccW = winners.acc === run.run_id;
+                  const isHallW = winners.hall === run.run_id;
+                  const isCostW = winners.cost === run.run_id;
+                  return (
+                    <div className="comparison-card">
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: 'var(--fg)' }}>
+                          {(run.provider || '').toUpperCase()}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--muted)' }}>{run.model}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{run.run_id}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 10 }}>
+                        <Metric
+                          label="Avg TTFA"
+                          value={m.average_ttfa_ms != null ? `${m.average_ttfa_ms.toFixed(0)} ms` : '—'}
+                          isWinner={isTtfaW}
+                          delta={!isTtfaW && winners.ttfaDelta ? `+${winners.ttfaDelta}ms` : null}
+                        />
+                        <Metric
+                          label="Tool Accuracy"
+                          value={m.tool_call_accuracy_rate != null ? `${(m.tool_call_accuracy_rate * 100).toFixed(0)}%` : '—'}
+                          isWinner={isAccW}
+                        />
+                        <Metric
+                          label="Hallucinations"
+                          value={m.hallucination_count ?? 0}
+                          isWinner={isHallW}
+                          tone={(m.hallucination_count ?? 0) > 0 ? 'error' : null}
+                        />
+                        <Metric
+                          label="Est. Cost"
+                          value={m.total_cost_usd != null ? `$${m.total_cost_usd.toFixed(4)}` : '—'}
+                          isWinner={isCostW}
+                        />
+                      </div>
+                    </div>
+                  );
+                };
+
+                const winners = { ttfa: ttfaWinner, acc: accWinner, hall: hallWinner, cost: costWinner, ttfaDelta };
+
+                const TurnCell = ({ run, turn }) => {
+                  const passed = !!turn.transcript_output && turn.evaluation_passed !== false;
+                  return (
+                    <div className="comparison-card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, color: 'var(--muted)' }}>
+                          {(run.provider || '').toUpperCase()}
+                        </span>
+                        <span className={`status-badge ${passed ? 'completed' : 'failed'}`}>{passed ? 'PASS' : 'FAIL'}</span>
+                      </div>
+                      <div style={{ fontSize: 13, margin: '8px 0', minHeight: 40 }}>
+                        {turn.transcript_output || (
+                          <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>(No speech output returned)</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px dashed var(--border)', paddingTop: 6 }}>
+                        <div>TTFA <strong>{turn.time_to_first_audio_ms ? `${turn.time_to_first_audio_ms.toFixed(0)}ms` : '—'}</strong></div>
+                        <div>Int Stop <strong>{turn.interruption_stop_latency_ms ? `${turn.interruption_stop_latency_ms.toFixed(0)}ms` : '—'}</strong></div>
+                        <div>Tool <strong>{turn.tool_call_details ? turn.tool_call_details.name : '—'}</strong></div>
+                      </div>
+                      {turn.audio_output_path && (
+                        <div style={{ marginTop: 8 }}>
+                          <AudioPlayer
+                            src={`/api/results/${run.provider}/${run.run_id}/${turn.utterance_id}_response.wav`}
+                            latencyMs={turn.time_to_first_audio_ms}
+                          />
+                        </div>
+                      )}
+                      {turn.evaluation_notes && (
+                        <div style={{ fontSize: 11, color: 'var(--muted)', background: 'rgba(0,0,0,0.05)', padding: '6px 10px', borderRadius: 6, marginTop: 6 }}>
+                          {turn.evaluation_notes}
+                        </div>
+                      )}
+                    </div>
+                  );
+                };
+
+                const showLiveLogs = !!compareRunIds || r1.status === 'running' || r2.status === 'running';
+
+                return (
               <div className="card">
                 <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <button 
-                      className="btn-icon" 
-                      onClick={() => { window.location.hash = '#/runs'; }}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg)', padding: 4, display: 'flex', alignItems: 'center' }}
-                      title="Back to Runs"
-                    >
-                      <ArrowLeft size={18} />
-                    </button>
-                    <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ArrowRightLeft size={16} />
-                      Side-by-Side Run Comparison
-                    </span>
-                  </div>
+                  <button
+                    className="btn-icon"
+                    onClick={() => { window.location.hash = '#/runs'; }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg)', padding: 4, display: 'flex', alignItems: 'center' }}
+                    title="Back to Runs"
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
+                  <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <GitCompare size={16} style={{ color: 'var(--color-primary)' }} />
+                    Side-by-Side Run Comparison
+                  </span>
                 </div>
                 <div className="card-body">
-                  {/* Split Summary */}
                   <div className="compare-split-view">
-                    <div className="comparison-card" style={{ borderLeft: '4px solid var(--color-primary)' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-primary)', letterSpacing: '0.05em' }}>RUN 1 (GEMINI)</div>
-                      <div style={{ fontSize: 15, fontWeight: 600, marginTop: 4 }}>{activeComparison.run1.model}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>ID: {activeComparison.run1.run_id}</div>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Avg TTFA</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>
-                            {activeComparison.run1.metrics?.average_ttfa_ms ? `${activeComparison.run1.metrics.average_ttfa_ms.toFixed(0)} ms` : '--'}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Tool Accuracy</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>
-                            {activeComparison.run1.metrics?.tool_call_accuracy_rate != null ? `${(activeComparison.run1.metrics.tool_call_accuracy_rate * 100).toFixed(0)}%` : '--'}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Hallucinations</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: activeComparison.run1.metrics?.hallucination_count > 0 ? 'var(--error)' : 'var(--fg)' }}>
-                            {activeComparison.run1.metrics?.hallucination_count ?? 0}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="comparison-card" style={{ borderLeft: '4px solid var(--color-secondary)' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-secondary)', letterSpacing: '0.05em' }}>RUN 2 (OPENAI)</div>
-                      <div style={{ fontSize: 15, fontWeight: 600, marginTop: 4 }}>{activeComparison.run2.model}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>ID: {activeComparison.run2.run_id}</div>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Avg TTFA</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>
-                            {activeComparison.run2.metrics?.average_ttfa_ms ? `${activeComparison.run2.metrics.average_ttfa_ms.toFixed(0)} ms` : '--'}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Tool Accuracy</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>
-                            {activeComparison.run2.metrics?.tool_call_accuracy_rate != null ? `${(activeComparison.run2.metrics.tool_call_accuracy_rate * 100).toFixed(0)}%` : '--'}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Hallucinations</div>
-                          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: 'var(--font-mono)', color: activeComparison.run2.metrics?.hallucination_count > 0 ? 'var(--error)' : 'var(--fg)' }}>
-                            {activeComparison.run2.metrics?.hallucination_count ?? 0}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    <SummaryCard run={r1} winners={winners} />
+                    <SummaryCard run={r2} winners={winners} />
                   </div>
 
-                  {/* Live comparison logs if active */}
-                  {(compareRunIds || activeComparison.run1.status === 'running' || activeComparison.run2.status === 'running') && (
-                    <div className="card" style={{ marginTop: 16 }}>
-                      <div className="card-header">
-                        <span className="card-title">Live Comparison Logs</span>
+                  {/* Live logs — collapsible so they don't dominate the page when not actively streaming. */}
+                  {showLiveLogs && (
+                    <details open={showLiveLogs && !!compareRunIds} style={{ marginTop: 16, border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px' }}>
+                      <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
+                        Live Comparison Logs
+                      </summary>
+                      <div className="terminal" style={{ marginTop: 8, height: 200 }}>
+                        {logs.map((log, idx) => (
+                          <div className="terminal-line" key={idx}>
+                            <span className="terminal-timestamp">[{log.time}]</span>
+                            <span>{log.text}</span>
+                          </div>
+                        ))}
+                        <div ref={logsEndRef} />
                       </div>
-                      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', height: '200px' }}>
-                        <div className="terminal" style={{ flex: 1 }}>
-                          {logs.map((log, idx) => (
-                            <div className="terminal-line" key={idx}>
-                              <span className="terminal-timestamp">[{log.time}]</span>
-                              <span>{log.text}</span>
-                            </div>
-                          ))}
-                          <div ref={logsEndRef} />
-                        </div>
-                      </div>
-                    </div>
+                    </details>
                   )}
 
-                  {/* Side-by-Side Turn list */}
                   <div style={{ marginTop: 20 }}>
                     <h3 style={{ fontSize: 13, fontWeight: 600, borderBottom: '1px solid var(--border)', paddingBottom: 6, marginBottom: 12 }}>
                       Turn Comparison
                     </h3>
-                    
-                    {activeComparison.run1.turns.map((turn1, index) => {
-                      const turn2 = activeComparison.run2.turns[index] || {};
-                      const passed1 = !!turn1.transcript_output && turn1.evaluation_passed !== false;
-                      const passed2 = !!turn2.transcript_output && turn2.evaluation_passed !== false;
-                      
+
+                    {r1.turns.map((turn1, index) => {
+                      const turn2 = r2.turns[index] || {};
+
                       return (
                         <div key={index} style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 16 }}>
                           <div style={{ marginBottom: 8 }}>
                             <span className="header-badge">TURN {turn1.utterance_id}</span>
                             <span style={{ fontSize: 12, marginLeft: 8, color: 'var(--muted)' }}>Prompt: "{turn1.text_input}"</span>
                           </div>
-                          
-                          <div className="compare-split-view" style={{ marginTop: 6 }}>
-                            <div className="comparison-card" style={{ borderLeft: `3px solid ${passed1 ? 'var(--success)' : 'var(--error)'}` }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-primary)' }}>GEMINI</span>
-                                <span className={`status-badge ${passed1 ? 'completed' : 'failed'}`}>{passed1 ? 'PASS' : 'FAIL'}</span>
-                              </div>
-                              <div style={{ fontSize: 13, margin: '8px 0', minHeight: 40 }}>
-                                {turn1.transcript_output || <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>(No speech output returned)</span>}
-                              </div>
-                              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px dashed var(--border)', paddingTop: 6 }}>
-                                <div>TTFA: <strong>{turn1.time_to_first_audio_ms ? `${turn1.time_to_first_audio_ms.toFixed(0)}ms` : '—'}</strong></div>
-                                <div>Int Stop: <strong>{turn1.interruption_stop_latency_ms ? `${turn1.interruption_stop_latency_ms.toFixed(0)}ms` : '—'}</strong></div>
-                                <div>Tool: <strong>{turn1.tool_call_details ? turn1.tool_call_details.name : '—'}</strong></div>
-                              </div>
-                              {turn1.audio_output_path && (
-                                <div style={{ marginTop: 8 }}>
-                                  <AudioPlayer
-                                    src={`/api/results/${activeComparison.run1.provider}/${activeComparison.run1.run_id}/${turn1.utterance_id}_response.wav`}
-                                    latencyMs={turn1.time_to_first_audio_ms}
-                                  />
-                                </div>
-                              )}
-                              {turn1.evaluation_notes && (
-                                <div style={{ fontSize: 11, color: 'var(--muted)', background: 'rgba(0,0,0,0.05)', padding: '6px 10px', borderRadius: 6, marginTop: 6 }}>
-                                  {turn1.evaluation_notes}
-                                </div>
-                              )}
-                            </div>
 
-                            <div className="comparison-card" style={{ borderLeft: `3px solid ${passed2 ? 'var(--success)' : 'var(--error)'}` }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-secondary)' }}>OPENAI</span>
-                                <span className={`status-badge ${passed2 ? 'completed' : 'failed'}`}>{passed2 ? 'PASS' : 'FAIL'}</span>
-                              </div>
-                              <div style={{ fontSize: 13, margin: '8px 0', minHeight: 40 }}>
-                                {turn2.transcript_output || <span style={{ fontStyle: 'italic', color: 'var(--muted)' }}>(No speech output returned)</span>}
-                              </div>
-                              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted)', borderTop: '1px dashed var(--border)', paddingTop: 6 }}>
-                                <div>TTFA: <strong>{turn2.time_to_first_audio_ms ? `${turn2.time_to_first_audio_ms.toFixed(0)}ms` : '—'}</strong></div>
-                                <div>Int Stop: <strong>{turn2.interruption_stop_latency_ms ? `${turn2.interruption_stop_latency_ms.toFixed(0)}ms` : '—'}</strong></div>
-                                <div>Tool: <strong>{turn2.tool_call_details ? turn2.tool_call_details.name : '—'}</strong></div>
-                              </div>
-                              {turn2.audio_output_path && (
-                                <div style={{ marginTop: 8 }}>
-                                  <AudioPlayer
-                                    src={`/api/results/${activeComparison.run2.provider}/${activeComparison.run2.run_id}/${turn2.utterance_id}_response.wav`}
-                                    latencyMs={turn2.time_to_first_audio_ms}
-                                  />
-                                </div>
-                              )}
-                              {turn2.evaluation_notes && (
-                                <div style={{ fontSize: 11, color: 'var(--muted)', background: 'rgba(0,0,0,0.05)', padding: '6px 10px', borderRadius: 6, marginTop: 6 }}>
-                                  {turn2.evaluation_notes}
-                                </div>
-                              )}
-                            </div>
+                          <div className="compare-split-view" style={{ marginTop: 6 }}>
+                            <TurnCell run={r1} turn={turn1} />
+                            <TurnCell run={r2} turn={turn2} />
                           </div>
                         </div>
                       );
@@ -1529,6 +1834,8 @@ function App() {
                   </div>
                 </div>
               </div>
+                );
+              })()
             ) : selectedRunId ? (
               // Detailed Inspector View
               <div className="card">
@@ -1542,7 +1849,8 @@ function App() {
                     >
                       <ArrowLeft size={18} />
                     </button>
-                    <span className="card-title" style={{ fontFamily: 'var(--font-mono)' }}>
+                    <span className="card-title" style={{ fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <ClipboardCheck size={16} style={{ color: 'var(--color-primary)' }} />
                       INSPECT: {selectedRunId.slice(0, 12)}...
                     </span>
                   </div>
@@ -1565,7 +1873,7 @@ function App() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: 24 }}>
                           <div className="card">
                             <div className="card-header">
-                              <span className="card-title">Live Pipeline Status</span>
+                              <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Play size={16} style={{ color: 'var(--color-primary)' }} />Live Pipeline Status</span>
                             </div>
                             <div className="card-body">
                               <LivePipelineVisualizer activeStep={getActivePipelineStep()} />
@@ -1574,7 +1882,7 @@ function App() {
                           
                           <div className="card">
                             <div className="card-header">
-                              <span className="card-title">Live Logs</span>
+                              <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><History size={16} style={{ color: 'var(--color-primary)' }} />Live Logs</span>
                             </div>
                             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', height: '240px' }}>
                               <div className="terminal" style={{ flex: 1 }}>
@@ -1627,6 +1935,29 @@ function App() {
                           </div>
                         </div>
                       </div>
+
+                      {/* Stitched Audio Row */}
+                      {selectedRunData.stitched_audio_path && (
+                        <div className="card" style={{ marginBottom: 24, padding: 16, border: '1px solid var(--border)', background: 'var(--accent-light)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                            <div>
+                              <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <AudioLines size={16} style={{ color: 'var(--color-primary)' }} />
+                                Stitched Call Audio (Left: User, Right: Bot)
+                              </h4>
+                              <p style={{ margin: '2px 0 0 0', fontSize: 12, color: 'var(--muted)' }}>
+                                Listen to the entire call timeline with user and bot audio stitched at real relative timing.
+                              </p>
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
+                              /api/results/{selectedRunData.provider}/{selectedRunData.run_id}/stitched.wav
+                            </div>
+                          </div>
+                          <AudioPlayer
+                            src={`/api/results/${selectedRunData.provider}/${selectedRunData.run_id}/stitched.wav`}
+                          />
+                        </div>
+                      )}
 
                       {/* Turn-by-Turn Logs */}
                       <h3 style={{ fontSize: 14, fontWeight: 600, borderBottom: '1px solid var(--border)', paddingBottom: 8, marginBottom: 16 }}>
@@ -1705,15 +2036,27 @@ function App() {
               // Run List Table
               <div className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', backgroundColor: 'var(--accent-light)' }}>
-                  <span className="card-title">Benchmark Runs</span>
-                  <div style={{ display: 'flex', gap: 12 }}>
-                    <button className="btn btn-primary" onClick={() => setIsNewRunModalOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <History size={16} style={{ color: 'var(--color-primary)' }} />
+                    Benchmark Runs
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <input
+                      type="text"
+                      className="text-input"
+                      value={runsSearchQuery}
+                      onChange={(e) => setRunsSearchQuery(e.target.value)}
+                      placeholder="Search runs..."
+                      style={{ width: 180, fontSize: 12, padding: '4px 8px', height: 28, margin: 0 }}
+                    />
+                    <button className="btn btn-primary" onClick={() => setIsNewRunModalOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, height: 28, padding: '4px 8px' }}>
                       <Plus size={14} /> New Run
                     </button>
                     {compareSelection.length === 2 && (
                       <button 
                         className="btn btn-primary"
                         onClick={() => { window.location.hash = `#/runs/compare/${compareSelection[0]}/${compareSelection[1]}`; }}
+                        style={{ fontSize: 12, height: 28, padding: '4px 8px' }}
                       >
                         Compare Selected ({compareSelection.length})
                       </button>
@@ -1725,24 +2068,71 @@ function App() {
                     <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '40px 0' }}>
                       No runs found in the results folder.
                     </p>
+                  ) : filteredAndSortedRuns.length === 0 ? (
+                    <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '40px 0' }}>
+                      No runs match your search query.
+                    </p>
                   ) : (
                     <table className="runs-table">
                       <thead>
                         <tr>
-                          <th style={{ width: 40, textAlign: 'center' }}>Compare</th>
-                          <th>Run ID</th>
-                          <th>Provider</th>
-                          <th>Model</th>
-                          <th>Transport</th>
-                          <th>Date</th>
-                          <th>Status</th>
+                          <th 
+                            onClick={() => handleSortRuns('run_id')} 
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                          >
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              Run ID {runsSortField === 'run_id' && (runsSortDirection === 'asc' ? '▲' : '▼')}
+                            </div>
+                          </th>
+                          <th 
+                            onClick={() => handleSortRuns('provider')} 
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                          >
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              Provider {runsSortField === 'provider' && (runsSortDirection === 'asc' ? '▲' : '▼')}
+                            </div>
+                          </th>
+                          <th 
+                            onClick={() => handleSortRuns('model')} 
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                          >
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              Model {runsSortField === 'model' && (runsSortDirection === 'asc' ? '▲' : '▼')}
+                            </div>
+                          </th>
+                          <th 
+                            onClick={() => handleSortRuns('transport')} 
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                          >
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              Transport {runsSortField === 'transport' && (runsSortDirection === 'asc' ? '▲' : '▼')}
+                            </div>
+                          </th>
+                          <th 
+                            onClick={() => handleSortRuns('created_at')} 
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                          >
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              Date {runsSortField === 'created_at' && (runsSortDirection === 'asc' ? '▲' : '▼')}
+                            </div>
+                          </th>
+                          <th 
+                            onClick={() => handleSortRuns('status')} 
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                          >
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              Status {runsSortField === 'status' && (runsSortDirection === 'asc' ? '▲' : '▼')}
+                            </div>
+                          </th>
+                          <th style={{ width: 80, textAlign: 'center' }}>Compare</th>
                           <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {runs.map((run) => {
+                        {filteredAndSortedRuns.map((run) => {
                           const isSelected = compareSelection.includes(run.run_id);
-                          const toggleSelection = (e) => {
+                          const toggleSelection = () => {
+                            if (run.status !== 'completed') return;
                             if (isSelected) {
                               setCompareSelection(compareSelection.filter(id => id !== run.run_id));
                             } else {
@@ -1754,16 +2144,22 @@ function App() {
                             }
                           };
 
+                          const handleRowClick = (e) => {
+                            if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+                              return;
+                            }
+                            toggleSelection();
+                          };
+
                           return (
-                            <tr key={run.run_id}>
-                              <td style={{ textAlign: 'center' }}>
-                                <input 
-                                  type="checkbox" 
-                                  checked={isSelected}
-                                  onChange={toggleSelection}
-                                  disabled={run.status !== 'completed'}
-                                />
-                              </td>
+                            <tr 
+                              key={run.run_id}
+                              onClick={handleRowClick}
+                              style={{ 
+                                cursor: run.status === 'completed' ? 'pointer' : 'default',
+                                opacity: run.status === 'completed' ? 1 : 0.85
+                              }}
+                            >
                               <td><code>{run.run_id.slice(0, 12)}</code></td>
                               <td>{run.provider.toUpperCase()}</td>
                               <td>{run.model}</td>
@@ -1774,7 +2170,16 @@ function App() {
                                   {run.status}
                                 </span>
                               </td>
-                              <td>
+                              <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                                <input 
+                                  type="checkbox" 
+                                  className="modern-checkbox"
+                                  checked={isSelected}
+                                  onChange={toggleSelection}
+                                  disabled={run.status !== 'completed'}
+                                />
+                              </td>
+                              <td onClick={(e) => e.stopPropagation()}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                   <button 
                                     className="btn" 
@@ -1810,6 +2215,78 @@ function App() {
 
         {activeTab === 'settings' && (
           <div className="scrollable-tab-container">
+            {/* Horizontal Settings Tabs */}
+            <div style={{ display: 'flex', gap: 24, borderBottom: '1px solid var(--border)', marginBottom: 20, paddingBottom: 8 }}>
+              <button
+                type="button"
+                onClick={() => setSettingsSubTab('models')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: settingsSubTab === 'models' ? 'var(--fg)' : 'var(--muted)',
+                  fontWeight: settingsSubTab === 'models' ? '600' : '500',
+                  paddingBottom: 8,
+                  position: 'relative',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                <Cpu size={16} />
+                Model Configuration
+                {settingsSubTab === 'models' && (
+                  <div style={{ position: 'absolute', bottom: -9, left: 0, right: 0, height: 2, backgroundColor: 'var(--fg)' }} />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsSubTab('utterances')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: settingsSubTab === 'utterances' ? 'var(--fg)' : 'var(--muted)',
+                  fontWeight: settingsSubTab === 'utterances' ? '600' : '500',
+                  paddingBottom: 8,
+                  position: 'relative',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                <MessageSquare size={16} />
+                Utterance Management
+                {settingsSubTab === 'utterances' && (
+                  <div style={{ position: 'absolute', bottom: -9, left: 0, right: 0, height: 2, backgroundColor: 'var(--fg)' }} />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsSubTab('danger')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: settingsSubTab === 'danger' ? 'var(--fg)' : 'var(--muted)',
+                  fontWeight: settingsSubTab === 'danger' ? '600' : '500',
+                  paddingBottom: 8,
+                  position: 'relative',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                <ShieldAlert size={16} />
+                Danger Zone
+                {settingsSubTab === 'danger' && (
+                  <div style={{ position: 'absolute', bottom: -9, left: 0, right: 0, height: 2, backgroundColor: 'var(--fg)' }} />
+                )}
+              </button>
+            </div>
             {/* Local Storage Security Banner */}
             <div className="setup-banner" style={{ 
               marginBottom: 16, 
@@ -1830,439 +2307,851 @@ function App() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginBottom: 24 }}>
-              {/* Google Gemini Settings */}
-              <div className="card" style={{ margin: 0 }}>
-                <div className="card-header">
-                  <span className="card-title">Google Gemini Configuration</span>
-                </div>
-                <div className="card-body">
-                  <div className="form-group" style={{ marginBottom: 12 }}>
-                    <label className="form-label">Google Gemini API Key</label>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <input
-                        type="password"
-                        className="text-input"
-                        value={settingsGoogleApiKey}
-                        onChange={(e) => {
-                          setSettingsGoogleApiKey(e.target.value);
-                          setGeminiVerifiedStatus(null);
-                        }}
-                        placeholder={settingsGoogleApiKey ? "••••••••" : "Enter Google API Key"}
-                        style={{ flex: 1 }}
-                      />
-                      <button 
-                        type="button" 
-                        className="btn" 
-                        onClick={() => handleVerifyKey('gemini')}
-                        disabled={verifyingProvider === 'gemini'}
-                        style={{ fontSize: 12, padding: '4px 12px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}
-                      >
-                        {verifyingProvider === 'gemini' ? 'Verifying...' : 'Verify'}
-                      </button>
-                    </div>
-                    {geminiVerifiedStatus && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: geminiVerifiedStatus.success ? 'var(--success)' : 'var(--error)', textAlign: 'left' }}>
-                        {geminiVerifiedStatus.success ? (
-                          <>
-                            <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
-                            <span>{geminiVerifiedStatus.message}</span>
-                          </>
-                        ) : (
-                          <>
-                            <XCircle size={14} style={{ color: 'var(--error)', flexShrink: 0 }} />
-                            <span>{geminiVerifiedStatus.message}</span>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="form-group" style={{ marginBottom: 12 }}>
-                    <label className="form-label">Gemini Model</label>
-                    <select
-                      className="select-input"
-                      value={geminiModelSelect}
-                      onChange={(e) => setGeminiModelSelect(e.target.value)}
-                    >
-                      <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live Preview (Default)</option>
-                      <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                      <option value="gemini-2.5-flash-8b">Gemini 2.5 Flash 8B</option>
-                      <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash Exp</option>
-                      <option value="custom">Custom Model...</option>
-                    </select>
-                  </div>
-
-                  {geminiModelSelect === 'custom' && (
-                    <div className="form-group" style={{ marginBottom: 12 }}>
-                      <label className="form-label">Custom Gemini Model ID</label>
-                      <input
-                        type="text"
-                        className="text-input"
-                        value={geminiModelCustom}
-                        onChange={(e) => setGeminiModelCustom(e.target.value)}
-                        placeholder="e.g. gemini-3.1-flash-live-preview"
-                      />
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-                    <button className="btn btn-primary" onClick={() => handleSaveModelSettings('gemini')}>
-                      Save Gemini Settings
-                    </button>
-                    {geminiSaveMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{geminiSaveMsg}</span>}
-                  </div>
-                </div>
-              </div>
-
-              {/* OpenAI Settings */}
-              <div className="card" style={{ margin: 0 }}>
-                <div className="card-header">
-                  <span className="card-title">OpenAI Configuration</span>
-                </div>
-                <div className="card-body">
-                  <div className="form-group" style={{ marginBottom: 12 }}>
-                    <label className="form-label">OpenAI API Key</label>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <input
-                        type="password"
-                        className="text-input"
-                        value={settingsOpenaiApiKey}
-                        onChange={(e) => {
-                          setSettingsOpenaiApiKey(e.target.value);
-                          setOpenaiVerifiedStatus(null);
-                        }}
-                        placeholder={settingsOpenaiApiKey ? "••••••••" : "Enter OpenAI API Key"}
-                        style={{ flex: 1 }}
-                      />
-                      <button 
-                        type="button" 
-                        className="btn" 
-                        onClick={() => handleVerifyKey('openai')}
-                        disabled={verifyingProvider === 'openai'}
-                        style={{ fontSize: 12, padding: '4px 12px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}
-                      >
-                        {verifyingProvider === 'openai' ? 'Verifying...' : 'Verify'}
-                      </button>
-                    </div>
-                    {openaiVerifiedStatus && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: openaiVerifiedStatus.success ? 'var(--success)' : 'var(--error)', textAlign: 'left' }}>
-                        {openaiVerifiedStatus.success ? (
-                          <>
-                            <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
-                            <span>{openaiVerifiedStatus.message}</span>
-                          </>
-                        ) : (
-                          <>
-                            <XCircle size={14} style={{ color: 'var(--error)', flexShrink: 0 }} />
-                            <span>{openaiVerifiedStatus.message}</span>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="form-group" style={{ marginBottom: 12 }}>
-                    <label className="form-label">OpenAI Model</label>
-                    <select
-                      className="select-input"
-                      value={openaiModelSelect}
-                      onChange={(e) => setOpenaiModelSelect(e.target.value)}
-                    >
-                      <option value="gpt-realtime-2">GPT Realtime 2 (Default)</option>
-                      <option value="gpt-4o-realtime-preview">GPT-4o Realtime Preview</option>
-                      <option value="gpt-4o-mini-realtime-preview">GPT-4o mini Realtime Preview</option>
-                      <option value="custom">Custom Model...</option>
-                    </select>
-                  </div>
-
-                  {openaiModelSelect === 'custom' && (
-                    <div className="form-group" style={{ marginBottom: 12 }}>
-                      <label className="form-label">Custom OpenAI Model ID</label>
-                      <input
-                        type="text"
-                        className="text-input"
-                        value={openaiModelCustom}
-                        onChange={(e) => setOpenaiModelCustom(e.target.value)}
-                        placeholder="e.g. gpt-realtime-2"
-                      />
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-                    <button className="btn btn-primary" onClick={() => handleSaveModelSettings('openai')}>
-                      Save OpenAI Settings
-                    </button>
-                    {openaiSaveMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{openaiSaveMsg}</span>}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Interactive Utterances List Editor */}
-            <div className="card" style={{ marginTop: 24 }}>
-              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="card-title">Scripted Test Utterances ({settingsUtterances.length})</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {templates.length > 0 && (
-                    <select
-                      className="select-input"
-                      value=""
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val) handleLoadTemplate(val);
-                      }}
-                      style={{ fontSize: 12, height: 28, padding: '2px 8px', width: 180, margin: 0 }}
-                    >
-                      <option value="" disabled>Load Template...</option>
-                      {templates.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name} ({t.turns_count} turns)
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <button 
-                    className="btn btn-primary" 
-                    onClick={() => {
-                      const nextIndex = settingsUtterances.length;
-                      const nextId = `u${String(nextIndex + 1).padStart(2, '0')}`;
-                      setSettingsUtterances([...settingsUtterances, { id: nextId, text: '' }]);
-                      setRawArgsState((prev) => ({ ...prev, [nextIndex]: '' }));
+            {settingsSubTab === 'models' && (
+              <>
+                {/* Horizontal Internal Sub-Tabs */}
+                <div style={{ display: 'flex', gap: 16, borderBottom: '1px solid var(--border)', marginBottom: 20, paddingBottom: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => setModelConfigSubTab('api_keys')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: modelConfigSubTab === 'api_keys' ? '2px solid var(--color-primary)' : '2px solid transparent',
+                      color: modelConfigSubTab === 'api_keys' ? 'var(--fg)' : 'var(--muted)',
+                      fontWeight: modelConfigSubTab === 'api_keys' ? '600' : '500',
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
                     }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, height: 28 }}
                   >
-                    <Plus size={14} /> Add Utterance
+                    <Key size={14} />
+                    API Keys
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModelConfigSubTab('evaluation')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: modelConfigSubTab === 'evaluation' ? '2px solid var(--color-primary)' : '2px solid transparent',
+                      color: modelConfigSubTab === 'evaluation' ? 'var(--fg)' : 'var(--muted)',
+                      fontWeight: modelConfigSubTab === 'evaluation' ? '600' : '500',
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}
+                  >
+                    <ClipboardCheck size={14} />
+                    Evaluation Config
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModelConfigSubTab('tts')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: modelConfigSubTab === 'tts' ? '2px solid var(--color-primary)' : '2px solid transparent',
+                      color: modelConfigSubTab === 'tts' ? 'var(--fg)' : 'var(--muted)',
+                      fontWeight: modelConfigSubTab === 'tts' ? '600' : '500',
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}
+                  >
+                    <Volume2 size={14} />
+                    TTS Config
                   </button>
                 </div>
-              </div>
-              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {settingsUtterances.length === 0 ? (
-                  <div className="onboarding-container" style={{
-                    padding: '30px 20px',
-                    textAlign: 'center',
-                    background: 'rgba(255, 255, 255, 0.01)',
-                    borderRadius: 12,
-                    border: '1px dashed var(--border)',
-                    margin: '10px 0'
-                  }}>
-                    <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--fg)' }}>
-                      Get Started with a Benchmarking Template
-                    </h3>
-                    <p style={{ color: 'var(--muted)', fontSize: 13, maxWidth: 500, margin: '0 auto 24px auto', lineHeight: 1.5 }}>
-                      Select one of the built-in benchmark usecases to populate your test utterances, or start with a blank list.
-                    </p>
-                    
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                      gap: 16,
-                      marginBottom: 24,
-                      textAlign: 'left'
-                    }}>
-                      {templates.map((t) => (
-                        <div key={t.id} className="glass-card" style={{
-                          padding: 16,
-                          borderRadius: 10,
-                          border: '1px solid var(--border)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'space-between',
-                          background: 'rgba(255, 255, 255, 0.02)',
-                          transition: 'transform 0.2s, box-shadow 0.2s',
-                          cursor: 'pointer'
-                        }}
-                        onClick={() => handleLoadTemplate(t.id)}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.transform = 'translateY(-2px)';
-                          e.currentTarget.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.2)';
-                          e.currentTarget.style.borderColor = 'var(--color-primary)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = 'none';
-                          e.currentTarget.style.boxShadow = 'none';
-                          e.currentTarget.style.borderColor = 'var(--border)';
-                        }}
-                        >
-                          <div>
-                            <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: 'var(--fg)' }}>{t.name}</h4>
-                            <p style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4, marginBottom: 12 }}>{t.description}</p>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-primary)' }}>{t.turns_count} Turns</span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                              Load Usecase <ChevronRight size={12} />
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
-                      <button 
-                        className="btn" 
-                        onClick={() => {
-                          setSettingsUtterances([{ id: 'u01', text: '' }]);
-                          setRawArgsState({ 0: '' });
-                        }}
-                        style={{ fontSize: 12 }}
-                      >
-                        Start Blank Usecase
-                      </button>
+                {/* Sub-Tab Content */}
+                {modelConfigSubTab === 'api_keys' && (
+                  <div className="card" style={{ margin: 0 }}>
+                    <div className="card-header">
+                      <span className="card-title">API Keys & Realtime Models</span>
+                    </div>
+                    <div className="card-body" style={{ padding: 0 }}>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="runs-table" style={{ margin: 0 }}>
+                          <thead>
+                            <tr>
+                              <th style={{ width: 140 }}>Provider</th>
+                              <th>API Key</th>
+                              <th>Realtime Model</th>
+                              <th style={{ width: 100, textAlign: 'center' }}>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td style={{ fontWeight: 600, fontSize: 13 }}>Google Gemini</td>
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    <input
+                                      type="password"
+                                      className="text-input"
+                                      value={settingsGoogleApiKey}
+                                      onChange={(e) => {
+                                        setSettingsGoogleApiKey(e.target.value);
+                                        setGeminiVerifiedStatus(null);
+                                      }}
+                                      placeholder={settingsGoogleApiKey ? '••••••••' : 'Enter Google API Key'}
+                                      style={{ flex: 1, height: 32, fontSize: 13, margin: 0 }}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      onClick={() => handleVerifyKey('gemini')}
+                                      disabled={verifyingProvider === 'gemini'}
+                                      style={{ fontSize: 12, padding: '4px 12px', height: 32 }}
+                                    >
+                                      {verifyingProvider === 'gemini' ? 'Verifying...' : 'Verify'}
+                                    </button>
+                                  </div>
+                                  {geminiVerifiedStatus && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: geminiVerifiedStatus.success ? 'var(--success)' : 'var(--error)' }}>
+                                      {geminiVerifiedStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                                      <span>{geminiVerifiedStatus.message}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  <select
+                                    className="select-input"
+                                    value={geminiModelSelect}
+                                    onChange={(e) => setGeminiModelSelect(e.target.value)}
+                                    style={{ height: 32, fontSize: 13, margin: 0 }}
+                                  >
+                                    <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live Preview (Default)</option>
+                                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                                    <option value="gemini-2.5-flash-8b">Gemini 2.5 Flash 8B</option>
+                                    <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash Exp</option>
+                                    <option value="custom">Custom Model...</option>
+                                  </select>
+                                  {geminiModelSelect === 'custom' && (
+                                    <input
+                                      type="text"
+                                      className="text-input"
+                                      value={geminiModelCustom}
+                                      onChange={(e) => setGeminiModelCustom(e.target.value)}
+                                      placeholder="Custom Model ID (e.g. gemini-3.1-flash)"
+                                      style={{ height: 32, fontSize: 13, margin: 0 }}
+                                    />
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                                  <button
+                                    className="btn btn-primary"
+                                    onClick={() => handleSaveModelSettings('gemini')}
+                                    style={{ fontSize: 12, padding: '6px 12px', height: 32 }}
+                                  >
+                                    Save
+                                  </button>
+                                  {geminiSaveMsg && (
+                                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>{geminiSaveMsg}</span>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style={{ fontWeight: 600, fontSize: 13 }}>OpenAI</td>
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    <input
+                                      type="password"
+                                      className="text-input"
+                                      value={settingsOpenaiApiKey}
+                                      onChange={(e) => {
+                                        setSettingsOpenaiApiKey(e.target.value);
+                                        setOpenaiVerifiedStatus(null);
+                                      }}
+                                      placeholder={settingsOpenaiApiKey ? '••••••••' : 'Enter OpenAI API Key'}
+                                      style={{ flex: 1, height: 32, fontSize: 13, margin: 0 }}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      onClick={() => handleVerifyKey('openai')}
+                                      disabled={verifyingProvider === 'openai'}
+                                      style={{ fontSize: 12, padding: '4px 12px', height: 32 }}
+                                    >
+                                      {verifyingProvider === 'openai' ? 'Verifying...' : 'Verify'}
+                                    </button>
+                                  </div>
+                                  {openaiVerifiedStatus && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: openaiVerifiedStatus.success ? 'var(--success)' : 'var(--error)' }}>
+                                      {openaiVerifiedStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                                      <span>{openaiVerifiedStatus.message}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  <select
+                                    className="select-input"
+                                    value={openaiModelSelect}
+                                    onChange={(e) => setOpenaiModelSelect(e.target.value)}
+                                    style={{ height: 32, fontSize: 13, margin: 0 }}
+                                  >
+                                    <option value="gpt-realtime-2">GPT Realtime 2 (Default)</option>
+                                    <option value="gpt-4o-realtime-preview">GPT-4o Realtime Preview</option>
+                                    <option value="gpt-4o-mini-realtime-preview">GPT-4o mini Realtime Preview</option>
+                                    <option value="custom">Custom Model...</option>
+                                  </select>
+                                  {openaiModelSelect === 'custom' && (
+                                    <input
+                                      type="text"
+                                      className="text-input"
+                                      value={openaiModelCustom}
+                                      onChange={(e) => setOpenaiModelCustom(e.target.value)}
+                                      placeholder="Custom Model ID (e.g. gpt-realtime-2)"
+                                      style={{ height: 32, fontSize: 13, margin: 0 }}
+                                    />
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                                  <button
+                                    className="btn btn-primary"
+                                    onClick={() => handleSaveModelSettings('openai')}
+                                    style={{ fontSize: 12, padding: '6px 12px', height: 32 }}
+                                  >
+                                    Save
+                                  </button>
+                                  {openaiSaveMsg && (
+                                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>{openaiSaveMsg}</span>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
-                ) : (
-                  settingsUtterances.map((u, idx) => {
-                    const expectType = u.expect?.tool ? 'tool' : u.expect?.response ? 'response' : 'none';
-                    
-                    return (
-                      <div key={idx} className="utterance-edit-row" style={{
-                        padding: 10,
-                        border: '1px solid var(--border)',
-                        borderRadius: 8,
-                        backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                        position: 'relative'
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>Turn #{idx + 1}</span>
-                            <input
-                              type="text"
-                              className="text-input"
-                              value={u.id}
-                              onChange={(e) => updateUtteranceField(idx, 'id', e.target.value)}
-                              style={{ width: 60, padding: '2px 4px', fontSize: 11, fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}
-                              placeholder="ID"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = settingsUtterances.filter((_, i) => i !== idx);
-                              setSettingsUtterances(updated);
-                              const nextRawArgs = {};
-                              updated.forEach((item, i) => {
-                                const oldIdx = i >= idx ? i + 1 : i;
-                                nextRawArgs[i] = rawArgsState[oldIdx] || '';
-                              });
-                              setRawArgsState(nextRawArgs);
+                )}
+
+                {modelConfigSubTab === 'evaluation' && (
+                  <div className="card" style={{ margin: 0 }}>
+                    <div className="card-header">
+                      <span className="card-title">Evaluation Configuration</span>
+                    </div>
+                    <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                        <strong>Evaluation model</strong> is the text-only model used by the LLM-judge reviewer for tool-call correctness and hallucination scoring. It does not affect the live voice agent.
+                      </div>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label">Evaluation Provider</label>
+                          <select
+                            className="select-input"
+                            value={evaluationProvider}
+                            onChange={(e) => {
+                              const newProv = e.target.value;
+                              setEvaluationProvider(newProv);
+                              if (newProv === 'gemini') {
+                                setEvaluationModelSelect('gemini-3.1-flash-lite');
+                              } else {
+                                setEvaluationModelSelect('gpt-4o-mini');
+                              }
                             }}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'var(--error)',
-                              cursor: 'pointer',
+                            style={{ height: 32, fontSize: 13 }}
+                          >
+                            <option value="gemini">Google Gemini</option>
+                            <option value="openai">OpenAI</option>
+                          </select>
+                        </div>
+
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label">Evaluator Model</label>
+                          <select
+                            className="select-input"
+                            value={evaluationModelSelect}
+                            onChange={(e) => setEvaluationModelSelect(e.target.value)}
+                            style={{ height: 32, fontSize: 13 }}
+                          >
+                            {evaluationProvider === 'gemini' ? (
+                              <>
+                                <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Default)</option>
+                                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="gpt-4o-mini">GPT-4o mini (Default)</option>
+                                <option value="gpt-4o">GPT-4o</option>
+                              </>
+                            )}
+                            <option value="custom">Custom Model...</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {evaluationModelSelect === 'custom' && (
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label">Custom Evaluator Model ID</label>
+                          <input
+                            type="text"
+                            className="text-input"
+                            value={evaluationModelCustom}
+                            onChange={(e) => setEvaluationModelCustom(e.target.value)}
+                            placeholder={evaluationProvider === 'gemini' ? 'e.g. gemini-3.5-flash' : 'e.g. o1-mini'}
+                            style={{ height: 32, fontSize: 13 }}
+                          />
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleSaveEvaluationSettings}
+                          style={{ fontSize: 13, padding: '6px 16px' }}
+                        >
+                          Save Evaluation Config
+                        </button>
+                        {advancedSaveMsg && (
+                          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{advancedSaveMsg}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {modelConfigSubTab === 'tts' && (
+                  <div className="card" style={{ margin: 0 }}>
+                    <div className="card-header">
+                      <span className="card-title">TTS Configuration</span>
+                    </div>
+                    <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                        <strong>TTS engine</strong> renders each utterance into audio that the harness then plays into the voice agent. <code>Local OS</code> is selected by default to generate audio on your machine without external API dependencies.
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                        <div className="form-group" style={{ margin: 0, maxWidth: 300 }}>
+                          <label className="form-label">Engine</label>
+                          <select
+                            className="select-input"
+                            value={ttsEngine}
+                            onChange={(e) => setTtsEngine(e.target.value)}
+                            style={{ height: 32, fontSize: 13 }}
+                          >
+                            <option value="local">Local OS (default)</option>
+                            <option value="auto">Auto (fallback chain)</option>
+                            <option value="openai" disabled={!ttsEngineAvailable.openai}>
+                              OpenAI{!ttsEngineAvailable.openai ? ' (no key)' : ''}
+                            </option>
+                            <option value="google" disabled={!ttsEngineAvailable.google}>
+                              Google{!ttsEngineAvailable.google ? ' (no key)' : ''}
+                            </option>
+                          </select>
+                        </div>
+
+                        {ttsEngine === 'local' && (
+                          <div style={{ padding: 12, borderRadius: 6, backgroundColor: 'var(--bg-accent)', fontSize: 12, color: 'var(--muted)' }}>
+                            <strong>Local OS TTS active.</strong> Uses the host machine's native speech synthesis engine (e.g. <code>say</code> on macOS, <code>espeak-ng</code>/<code>espeak</code> on Linux, or PowerShell on Windows). No API keys or extra settings are required.
+                          </div>
+                        )}
+
+                        {(ttsEngine === 'openai' || ttsEngine === 'auto') && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, border: '1px solid var(--border)', borderRadius: 6, backgroundColor: 'var(--card-bg)' }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>OpenAI TTS Settings</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                              <div className="form-group" style={{ margin: 0 }}>
+                                <label className="form-label">OpenAI TTS model</label>
+                                <select
+                                  className="select-input"
+                                  value={openaiTtsModel}
+                                  onChange={(e) => setOpenaiTtsModel(e.target.value)}
+                                  style={{ height: 32, fontSize: 13 }}
+                                >
+                                  <option value="tts-1">tts-1 (default)</option>
+                                  <option value="tts-1-hd">tts-1-hd</option>
+                                  <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
+                                </select>
+                              </div>
+                              <div className="form-group" style={{ margin: 0 }}>
+                                <label className="form-label">OpenAI TTS voice</label>
+                                <select
+                                  className="select-input"
+                                  value={openaiTtsVoice}
+                                  onChange={(e) => setOpenaiTtsVoice(e.target.value)}
+                                  style={{ height: 32, fontSize: 13 }}
+                                >
+                                  <option value="nova">nova</option>
+                                  <option value="alloy">alloy</option>
+                                  <option value="echo">echo</option>
+                                  <option value="fable">fable</option>
+                                  <option value="onyx">onyx</option>
+                                  <option value="shimmer">shimmer</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {(ttsEngine === 'google' || ttsEngine === 'auto') && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, border: '1px solid var(--border)', borderRadius: 6, backgroundColor: 'var(--card-bg)' }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>Google TTS Settings</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: googleTtsVoiceSelect === 'custom' ? '1fr 1fr' : '1fr', gap: 16 }}>
+                              <div className="form-group" style={{ margin: 0 }}>
+                                <label className="form-label">Google TTS Voice</label>
+                                <select
+                                  className="select-input"
+                                  value={googleTtsVoiceSelect}
+                                  onChange={(e) => setGoogleTtsVoiceSelect(e.target.value)}
+                                  style={{ height: 32, fontSize: 13 }}
+                                >
+                                  <option value="en-US-Journey-F">en-US-Journey-F (Female Journey)</option>
+                                  <option value="en-US-Journey-D">en-US-Journey-D (Male Journey)</option>
+                                  <option value="en-US-Wavenet-F">en-US-Wavenet-F (Female Wavenet)</option>
+                                  <option value="en-US-Wavenet-D">en-US-Wavenet-D (Male Wavenet)</option>
+                                  <option value="en-US-Neutral-A">en-US-Neutral-A (Neutral)</option>
+                                  <option value="en-US-News-K">en-US-News-K (News Style)</option>
+                                  <option value="custom">Custom Voice...</option>
+                                </select>
+                              </div>
+
+                              {googleTtsVoiceSelect === 'custom' && (
+                                <div className="form-group" style={{ margin: 0 }}>
+                                  <label className="form-label">Custom Voice ID</label>
+                                  <input
+                                    type="text"
+                                    className="text-input"
+                                    value={googleTtsVoiceCustom}
+                                    onChange={(e) => setGoogleTtsVoiceCustom(e.target.value)}
+                                    placeholder="e.g. en-US-Journey-F"
+                                    style={{ height: 32, fontSize: 13 }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        <strong>Local OS availability:</strong>{' '}
+                        macOS uses <code>say</code> (built-in); Linux requires <code>espeak-ng</code> or <code>espeak</code> on PATH; Windows uses PowerShell's <code>System.Speech.Synthesis</code>.
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleSaveTtsSettings}
+                          style={{ fontSize: 13, padding: '6px 16px' }}
+                        >
+                          Save TTS Config
+                        </button>
+                        {advancedSaveMsg && (
+                          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{advancedSaveMsg}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {settingsSubTab === 'utterances' && (
+              <div className="card" style={{ margin: 0 }}>
+                <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span className="card-title">Scripted Test Utterances ({settingsUtterances.length})</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {templates.length > 0 && (
+                      <select
+                        className="select-input"
+                        value={selectedTemplateId || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val) handleLoadTemplate(val);
+                        }}
+                        style={{ fontSize: 12, height: 28, padding: '2px 8px', width: 180, margin: 0 }}
+                      >
+                        <option value="" disabled>Load Template...</option>
+                        {selectedTemplateId === 'custom' && (
+                          <option value="custom" disabled>Custom Usecase</option>
+                        )}
+                        {templates.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name} ({t.turns_count} turns)
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={() => {
+                        const nextIndex = settingsUtterances.length;
+                        const nextId = `u${String(nextIndex + 1).padStart(2, '0')}`;
+                        setNewUtteranceId(nextId);
+                        setNewUtteranceText('');
+                        setNewUtteranceExpectType('none');
+                        setNewUtterancePhrases('');
+                        setNewUtteranceTool('');
+                        setNewUtteranceArgs('');
+                        setIsAddUtteranceModalOpen(true);
+                      }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, height: 28 }}
+                    >
+                      <Plus size={14} /> Add Utterance
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleSaveUtterances}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 12, height: 28 }}
+                    >
+                      Save Utterances
+                    </button>
+                    {utterancesSaveMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{utterancesSaveMsg}</span>}
+                  </div>
+                </div>
+                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {settingsUtterances.length === 0 ? (
+                    <div className="onboarding-container" style={{
+                      padding: '30px 20px',
+                      textAlign: 'center',
+                      background: 'rgba(255, 255, 255, 0.01)',
+                      borderRadius: 12,
+                      border: '1px dashed var(--border)',
+                      margin: '10px 0'
+                    }}>
+                      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--fg)' }}>
+                        Get Started with a Benchmarking Template
+                      </h3>
+                      <p style={{ color: 'var(--muted)', fontSize: 13, maxWidth: 500, margin: '0 auto 24px auto', lineHeight: 1.5 }}>
+                        Select one of the built-in benchmark usecases to populate your test utterances, or start with a blank list.
+                      </p>
+                      
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                        gap: 16,
+                        marginBottom: 24,
+                        textAlign: 'left'
+                      }}>
+                        {templates.map((t) => (
+                          <div key={t.id} className="glass-card" style={{
+                            padding: 16,
+                            borderRadius: 10,
+                            border: '1px solid var(--border)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            background: 'rgba(255, 255, 255, 0.02)',
+                            transition: 'transform 0.2s, box-shadow 0.2s',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => handleLoadTemplate(t.id)}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.2)';
+                            e.currentTarget.style.borderColor = 'var(--color-primary)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'none';
+                            e.currentTarget.style.boxShadow = 'none';
+                            e.currentTarget.style.borderColor = 'var(--border)';
+                          }}
+                          >
+                            <div>
+                              <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: 'var(--fg)' }}>{t.name}</h4>
+                              <p style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4, marginBottom: 12 }}>{t.description}</p>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+                              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-primary)' }}>{t.turns_count} Turns</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                Load Usecase <ChevronRight size={12} />
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
+                        <button 
+                          className="btn" 
+                          onClick={() => {
+                            setSettingsUtterances([{ id: 'u01', text: '' }]);
+                            setRawArgsState({ 0: '' });
+                          }}
+                          style={{ fontSize: 12 }}
+                        >
+                          Start Blank Usecase
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ position: 'relative', paddingLeft: '32px', display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '8px' }}>
+                      {/* Vertical Connecting Line */}
+                      <div style={{
+                        position: 'absolute',
+                        left: '11px',
+                        top: '12px',
+                        bottom: '12px',
+                        width: '2px',
+                        backgroundColor: 'var(--border)'
+                      }} />
+
+                      {settingsUtterances.map((u, idx) => {
+                        // Order matters: tool > phrases (response_contains) > legacy response
+                        const expectType = u.expect?.tool
+                          ? 'tool'
+                          : Array.isArray(u.expect?.response_contains)
+                            ? 'phrases'
+                            : u.expect?.response
+                              ? 'phrases'  // migrate legacy {response: "x"} into the phrases editor
+                              : 'none';
+                        
+                        return (
+                          <div key={idx} style={{ position: 'relative' }}>
+                            {/* Chained node circle indicator */}
+                            <div style={{
+                              position: 'absolute',
+                              left: '-32px',
+                              top: '10px',
+                              width: '24px',
+                              height: '24px',
+                              borderRadius: '50%',
+                              backgroundColor: 'var(--bg)',
+                              border: '2px solid var(--color-primary)',
                               display: 'flex',
                               alignItems: 'center',
-                              padding: 4
-                            }}
-                            title="Delete Utterance"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          <div className="form-group" style={{ margin: 0 }}>
-                            <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Prompt text</label>
-                            <input
-                              type="text"
-                              className="text-input"
-                              value={u.text}
-                              onChange={(e) => updateUtteranceField(idx, 'text', e.target.value)}
-                              placeholder="Enter the phrase user should say..."
-                              style={{ fontSize: 12, padding: '4px 8px' }}
-                            />
-                          </div>
-
-                          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: 8, alignItems: 'end' }}>
-                            <div className="form-group" style={{ margin: 0 }}>
-                              <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Expectation validation</label>
-                              <select
-                                className="select-input"
-                                value={expectType}
-                                onChange={(e) => updateUtteranceExpectType(idx, e.target.value)}
-                                style={{ fontSize: 11, padding: '3px 6px', height: 26 }}
-                              >
-                                <option value="none">None (No check)</option>
-                                <option value="response">Expected Response (Substring)</option>
-                                <option value="tool">Expected Tool Call</option>
-                              </select>
+                              justifyContent: 'center',
+                              zIndex: 2,
+                              boxShadow: '0 0 8px rgba(99, 102, 241, 0.2)'
+                            }}>
+                              <span style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--color-primary)' }}>
+                                {idx + 1}
+                              </span>
                             </div>
 
-                            {expectType === 'response' && (
-                              <div className="form-group" style={{ margin: 0 }}>
-                                <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Expected response phrase</label>
-                                <input
-                                  type="text"
-                                  className="text-input"
-                                  value={u.expect?.response || ''}
-                                  onChange={(e) => updateUtteranceExpectField(idx, 'response', e.target.value)}
-                                  placeholder="e.g. open from 9am to 10pm"
-                                  style={{ fontSize: 12, padding: '3px 6px', height: 26 }}
-                                />
+                            {/* Card Content Row */}
+                            <div className="utterance-edit-row" style={{
+                              padding: 10,
+                              border: '1px solid var(--border)',
+                              borderRadius: 8,
+                              backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                              position: 'relative'
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>Turn #{idx + 1}</span>
+                                  <input
+                                    type="text"
+                                    className="text-input"
+                                    value={u.id}
+                                    onChange={(e) => updateUtteranceField(idx, 'id', e.target.value)}
+                                    style={{ width: 60, padding: '2px 4px', fontSize: 11, fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}
+                                    placeholder="ID"
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = settingsUtterances.filter((_, i) => i !== idx);
+                                    setSettingsUtterances(updated);
+                                    const nextRawArgs = {};
+                                    updated.forEach((item, i) => {
+                                      const oldIdx = i >= idx ? i + 1 : i;
+                                      nextRawArgs[i] = rawArgsState[oldIdx] || '';
+                                    });
+                                    setRawArgsState(nextRawArgs);
+                                  }}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--error)',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    padding: 4
+                                  }}
+                                  title="Delete Utterance"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
                               </div>
-                            )}
 
-                            {expectType === 'tool' && (
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 <div className="form-group" style={{ margin: 0 }}>
-                                  <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Expected tool name</label>
+                                  <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Prompt text</label>
                                   <input
                                     type="text"
                                     className="text-input"
-                                    value={u.expect?.tool || ''}
-                                    onChange={(e) => updateUtteranceExpectField(idx, 'tool', e.target.value)}
-                                    placeholder="e.g. get_hours"
-                                    style={{ fontSize: 12, padding: '3px 6px', height: 26 }}
+                                    value={u.text}
+                                    onChange={(e) => updateUtteranceField(idx, 'text', e.target.value)}
+                                    placeholder="Enter the phrase user should say..."
+                                    style={{ fontSize: 12, padding: '4px 8px' }}
                                   />
                                 </div>
-                                <div className="form-group" style={{ margin: 0 }}>
-                                  <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Expected arguments (JSON)</label>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: 8, alignItems: 'end' }}>
+                                  <div className="form-group" style={{ margin: 0 }}>
+                                    <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Expectation validation</label>
+                                    <select
+                                      className="select-input"
+                                      value={expectType}
+                                      onChange={(e) => updateUtteranceExpectType(idx, e.target.value)}
+                                      style={{ fontSize: 11, padding: '3px 6px', height: 26 }}
+                                    >
+                                      <option value="none">None (No check)</option>
+                                      <option value="phrases">Response contains (any of)</option>
+                                      <option value="tool">Expected Tool Call</option>
+                                    </select>
+                                  </div>
+
+                                  {expectType === 'phrases' && (
+                                    <div className="form-group" style={{ margin: 0 }}>
+                                      <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>
+                                        Phrases the response must contain (comma-separated)
+                                      </label>
+                                      <input
+                                        type="text"
+                                        className="text-input"
+                                        value={(Array.isArray(u.expect?.response_contains)
+                                          ? u.expect.response_contains
+                                          : (u.expect?.response ? [u.expect.response] : [])
+                                        ).join(', ')}
+                                        onChange={(e) => {
+                                          const phrases = e.target.value
+                                            .split(',')
+                                            .map((p) => p.trim())
+                                            .filter((p) => p.length > 0);
+                                          const updated = [...settingsUtterances];
+                                          const current = updated[idx];
+                                          // Wipe legacy `response` if present; canonical field is response_contains.
+                                          const { response: _legacy, ...restExpect } = current.expect || {};
+                                          updated[idx] = { ...current, expect: { ...restExpect, response_contains: phrases } };
+                                          setSettingsUtterances(updated);
+                                        }}
+                                        placeholder="verify, identity"
+                                        style={{ fontSize: 12, padding: '3px 6px', height: 26 }}
+                                      />
+                                    </div>
+                                  )}
+
+                                  {expectType === 'tool' && (
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                                      <div className="form-group" style={{ margin: 0 }}>
+                                        <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Expected tool name</label>
+                                        <input
+                                          type="text"
+                                          className="text-input"
+                                          value={u.expect?.tool || ''}
+                                          onChange={(e) => updateUtteranceExpectField(idx, 'tool', e.target.value)}
+                                          placeholder="e.g. get_hours"
+                                          style={{ fontSize: 12, padding: '3px 6px', height: 26 }}
+                                        />
+                                      </div>
+                                      <div className="form-group" style={{ margin: 0 }}>
+                                        <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Expected arguments (JSON)</label>
+                                        <input
+                                          type="text"
+                                          className="text-input"
+                                          value={rawArgsState[idx] || ''}
+                                          onChange={(e) => handleArgsChange(idx, e.target.value)}
+                                          placeholder='e.g. {"guests": 2}'
+                                          style={{ fontSize: 11, fontFamily: 'var(--font-mono)', padding: '3px 6px', height: 26 }}
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: 8, alignItems: 'end' }}>
+                                  <div className="form-group" style={{ margin: 0 }}>
+                                    <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Turn behavior</label>
+                                    <select
+                                      className="select-input"
+                                      value={u.behavior?.type || 'sequential'}
+                                      onChange={(e) => updateUtteranceBehavior(idx, e.target.value)}
+                                      style={{ fontSize: 11, padding: '3px 6px', height: 26 }}
+                                    >
+                                      <option value="sequential">Sequential (default)</option>
+                                      <option value="barge_in">Barge-in (interrupt previous turn)</option>
+                                    </select>
+                                  </div>
+
+                                  {u.behavior?.type === 'barge_in' && (
+                                    <div className="form-group" style={{ margin: 0 }}>
+                                      <label className="form-label" style={{ fontSize: 11, marginBottom: 2 }}>Delay before interrupting (ms)</label>
+                                      <input
+                                        type="number"
+                                        className="text-input"
+                                        value={u.behavior?.delay_ms ?? 600}
+                                        onChange={(e) => updateUtteranceBehaviorField(idx, 'delay_ms', parseInt(e.target.value, 10) || 0)}
+                                        style={{ fontSize: 12, padding: '3px 6px', height: 26 }}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="form-group" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
                                   <input
-                                    type="text"
-                                    className="text-input"
-                                    value={rawArgsState[idx] || ''}
-                                    onChange={(e) => handleArgsChange(idx, e.target.value)}
-                                    placeholder='e.g. {"guests": 2}'
-                                    style={{ fontSize: 11, fontFamily: 'var(--font-mono)', padding: '3px 6px', height: 26 }}
+                                    type="checkbox"
+                                    id={`interrupted-${idx}`}
+                                    checked={!!u.expect?.interrupted}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        updateUtteranceExpectField(idx, 'interrupted', true);
+                                      } else {
+                                        const updated = [...settingsUtterances];
+                                        const current = updated[idx];
+                                        const { interrupted, ...restExpect } = current.expect || {};
+                                        updated[idx] = { ...current, expect: restExpect };
+                                        setSettingsUtterances(updated);
+                                      }
+                                    }}
                                   />
+                                  <label className="form-label" htmlFor={`interrupted-${idx}`} style={{ fontSize: 11, margin: 0 }}>
+                                    Assert this turn was interrupted (barge-in)
+                                  </label>
                                 </div>
                               </div>
-                            )}
+                            </div>
                           </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
-                  <button className="btn btn-primary" onClick={handleSaveUtterances}>
-                    Save Utterances
-                  </button>
-                  {utterancesSaveMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{utterancesSaveMsg}</span>}
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Danger Zone */}
-            <div className="card danger-zone" style={{ marginTop: 24 }}>
-              <div className="card-header">
-                <span className="card-title" style={{ color: 'var(--error)' }}>Danger Zone</span>
-              </div>
-              <div className="card-body">
-                <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
-                  Permanently delete all run history, transcripts, and audio files, and reset the database to a clean state. This cannot be undone.
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <button className="btn btn-danger" onClick={handleResetDatabase}>
-                    Reset All Data
-                  </button>
-                  {resetMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{resetMsg}</span>}
+            {settingsSubTab === 'danger' && (
+              <div className="card danger-zone" style={{ margin: 0 }}>
+                <div className="card-header">
+                  <span className="card-title" style={{ color: 'var(--error)' }}>Danger Zone</span>
+                </div>
+                <div className="card-body">
+                  <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+                    Permanently delete all run history, transcripts, and audio files, and reset the database to a clean state. This cannot be undone.
+                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <button className="btn btn-danger" onClick={handleResetDatabase}>
+                      Reset All Data
+                    </button>
+                    {resetMsg && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{resetMsg}</span>}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </main>
@@ -2438,6 +3327,183 @@ function App() {
           </div>
         );
       })()}
+
+      {isAddUtteranceModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsAddUtteranceModalOpen(false)}>
+          <div className="modal-content-card glass-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Add New Test Utterance</span>
+              <button className="modal-close-btn" onClick={() => setIsAddUtteranceModalOpen(false)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ color: 'var(--fg)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Turn ID</label>
+                  <input
+                    type="text"
+                    className="text-input"
+                    value={newUtteranceId}
+                    onChange={(e) => setNewUtteranceId(e.target.value)}
+                    style={{ fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}
+                    placeholder="ID"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Prompt Text</label>
+                  <input
+                    type="text"
+                    className="text-input"
+                    value={newUtteranceText}
+                    onChange={(e) => setNewUtteranceText(e.target.value)}
+                    placeholder="Enter the phrase the user should say..."
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Expectation Validation</label>
+                <select
+                  className="select-input"
+                  value={newUtteranceExpectType}
+                  onChange={(e) => setNewUtteranceExpectType(e.target.value)}
+                >
+                  <option value="none">None (No check)</option>
+                  <option value="phrases">Response contains (any of)</option>
+                  <option value="tool">Expected Tool Call</option>
+                </select>
+              </div>
+
+              {newUtteranceExpectType === 'phrases' && (
+                <div className="form-group">
+                  <label className="form-label">
+                    Phrases the response must contain (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    className="text-input"
+                    value={newUtterancePhrases}
+                    onChange={(e) => setNewUtterancePhrases(e.target.value)}
+                    placeholder="e.g. verify, identity"
+                  />
+                </div>
+              )}
+
+              {newUtteranceExpectType === 'tool' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Expected Tool Name</label>
+                    <input
+                      type="text"
+                      className="text-input"
+                      value={newUtteranceTool}
+                      onChange={(e) => setNewUtteranceTool(e.target.value)}
+                      placeholder="e.g. get_hours"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Expected Arguments (JSON)</label>
+                    <input
+                      type="text"
+                      className="text-input"
+                      value={newUtteranceArgs}
+                      onChange={(e) => setNewUtteranceArgs(e.target.value)}
+                      placeholder='e.g. {"guests": 2}'
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
+                <button className="btn" type="button" onClick={() => setIsAddUtteranceModalOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => {
+                    if (!newUtteranceId.trim()) {
+                      alert('Please provide a Turn ID.');
+                      return;
+                    }
+                    if (!newUtteranceText.trim()) {
+                      alert('Please provide prompt text.');
+                      return;
+                    }
+
+                    const newUtt = {
+                      id: newUtteranceId.trim(),
+                      text: newUtteranceText.trim(),
+                    };
+
+                    if (newUtteranceExpectType === 'phrases') {
+                      const phrases = newUtterancePhrases
+                        .split(',')
+                        .map((p) => p.trim())
+                        .filter((p) => p.length > 0);
+                      newUtt.expect = { response_contains: phrases };
+                    } else if (newUtteranceExpectType === 'tool') {
+                      let parsedArgs = {};
+                      if (newUtteranceArgs.trim()) {
+                        try {
+                          parsedArgs = JSON.parse(newUtteranceArgs);
+                        } catch (e) {
+                          alert('Invalid JSON in expected arguments. Please correct it or leave it empty.');
+                          return;
+                        }
+                      }
+                      newUtt.expect = {
+                        tool: newUtteranceTool.trim(),
+                        args: parsedArgs,
+                      };
+                    }
+
+                    const nextIndex = settingsUtterances.length;
+                    setSettingsUtterances([...settingsUtterances, newUtt]);
+                    setRawArgsState((prev) => ({ ...prev, [nextIndex]: newUtteranceArgs }));
+                    setIsAddUtteranceModalOpen(false);
+                  }}
+                >
+                  Add Utterance
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmModalConfig && (
+        <div className="modal-overlay" onClick={() => setConfirmModalConfig(null)}>
+          <div className="modal-content-card glass-card" style={{ maxWidth: 450 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">{confirmModalConfig.title}</span>
+              <button className="modal-close-btn" onClick={() => setConfirmModalConfig(null)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ color: 'var(--fg)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <p style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5, margin: 0 }}>
+                {confirmModalConfig.message}
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
+                <button className="btn" type="button" onClick={() => setConfirmModalConfig(null)}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => {
+                    confirmModalConfig.onConfirm();
+                    setConfirmModalConfig(null);
+                  }}
+                  style={confirmModalConfig.isDanger ? { backgroundColor: 'var(--error)', borderColor: 'var(--error)', color: '#fff' } : {}}
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

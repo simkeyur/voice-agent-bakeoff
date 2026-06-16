@@ -62,6 +62,9 @@ voxarena/
 │   │   └── openai.py
 │   ├── tools.py
 │   ├── harness.py
+│   ├── turn_behaviors.py
+│   ├── evaluators.py
+│   ├── pricing.py
 │   └── metrics.py
 ├── script/
 │   ├── utterances.yaml
@@ -73,3 +76,19 @@ voxarena/
 ## Layout Rule
 
 Keep provider-specific code isolated in adapters. Do not let vendor branches spread through the agent or harness.
+
+## Configuration Surfaces
+
+User-tunable settings live in three places, with environment > SQLite settings table > in-code defaults. The same surface is exposed via:
+
+- **CLI** — `voxarena config list|get|set` writes to the SQLite settings table.
+- **Web UI** — Settings → "Advanced: Evaluation & TTS" calls `/api/settings`.
+- **`.env`** — read into `AppSettings` at startup.
+
+Keys grouped by purpose:
+
+- **Voice agents** (live realtime models): `GEMINI_MODEL`, `OPENAI_MODEL`.
+- **Evaluators** (LLM-judge text models): `GEMINI_EVAL_MODEL`, `OPENAI_EVAL_MODEL`.
+- **TTS** (utterance audio synthesis): `TTS_ENGINE` (`auto`/`openai`/`google`/`local`), `OPENAI_TTS_MODEL`, `OPENAI_TTS_VOICE`, `GOOGLE_TTS_VOICE`.
+
+The TTS engine selection is a fallback chain — `auto` walks `openai → google → local`, and an explicit choice tries that engine first but still falls through if it's unavailable, so the harness never stalls on missing credentials.

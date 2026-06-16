@@ -36,9 +36,36 @@ from voxarena.runner import ACTIVE_HARNESSES, create_pending_manifest
 
 
 def _backfill_manifests() -> None:
-    """Walk results/ for manifest.json files and upsert any missing in SQLite."""
+    """Walk results/ for manifest.json files and upsert any missing in SQLite.
+
+    Skips after first successful pass unless a manifest.json on disk is newer
+    than the last-backfill timestamp — avoids paying disk-walk cost on every
+    boot once the install has accumulated a lot of runs.
+    """
+    last_backfill = get_setting("LAST_BACKFILL_TS")
+    last_backfill_ts = float(last_backfill) if last_backfill else 0.0
+
+    # Cheap mtime probe: if no manifest is newer than our last pass, skip.
+    results_dir = settings.RESULTS_DIR
+    if last_backfill_ts > 0 and os.path.isdir(results_dir):
+        newest = 0.0
+        for root, _, files in os.walk(results_dir):
+            for f in files:
+                if f == "manifest.json":
+                    try:
+                        newest = max(newest, os.path.getmtime(os.path.join(root, f)))
+                    except OSError:
+                        pass
+                    if newest > last_backfill_ts:
+                        break
+            if newest > last_backfill_ts:
+                break
+        if newest <= last_backfill_ts:
+            logger.debug("Backfill skipped (no manifest.json newer than last pass).")
+            return
+
     known_ids = set(list_run_ids())
-    manifest_files = glob.glob(os.path.join(settings.RESULTS_DIR, "**", "manifest.json"), recursive=True)
+    manifest_files = glob.glob(os.path.join(results_dir, "**", "manifest.json"), recursive=True)
     for file_path in manifest_files:
         try:
             manifest = RunManifest.load(file_path)
@@ -47,6 +74,8 @@ def _backfill_manifests() -> None:
         except Exception as e:
             logger.error(f"Failed to backfill manifest at {file_path}: {e}")
 
+    set_setting("LAST_BACKFILL_TS", str(time.time()))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,7 +83,18 @@ async def lifespan(app: FastAPI):
     # Disk walks + YAML/JSON parses shouldn't block the event loop on startup.
     await asyncio.to_thread(_backfill_manifests)
     await asyncio.to_thread(bootstrap_utterances_if_empty)
+    await asyncio.to_thread(_prune_synth_cache)
     yield
+
+
+def _prune_synth_cache() -> None:
+    """Drop synthesized WAVs whose hash doesn't match any current utterance text."""
+    try:
+        from voxarena.audio_cache import prune_orphan_synth_files
+        utts = load_utterances_from_db()
+        prune_orphan_synth_files([u.get("text", "") for u in utts])
+    except Exception as e:
+        logger.warning(f"Synth-cache prune failed: {e}")
 
 
 app = FastAPI(
@@ -134,6 +174,24 @@ class SettingsUpdateRequest(BaseModel):
     openai_model: str
     google_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
+    # Evaluation model (optional — keep existing values if omitted)
+    evaluation_model: Optional[str] = None
+    evaluation_provider: Optional[str] = None
+    # TTS configuration (optional)
+    tts_engine: Optional[str] = None
+    openai_tts_model: Optional[str] = None
+    openai_tts_voice: Optional[str] = None
+    google_tts_voice: Optional[str] = None
+
+
+def _current_tts_capabilities() -> dict:
+    """Which TTS engines this host can actually use right now."""
+    from voxarena.audio_cache import _engine_available
+    return {
+        "openai": _engine_available("openai"),
+        "google": _engine_available("google"),
+        "local": _engine_available("local"),
+    }
 
 
 @app.get("/api/settings")
@@ -145,6 +203,13 @@ async def get_settings():
         "openai_model": get_setting("OPENAI_MODEL") or settings.OPENAI_MODEL,
         "google_api_key": "••••••••" if google_key else "",
         "openai_api_key": "••••••••" if openai_key else "",
+        "evaluation_model": get_setting("EVALUATION_MODEL") or settings.EVALUATION_MODEL,
+        "evaluation_provider": get_setting("EVALUATION_PROVIDER") or settings.EVALUATION_PROVIDER,
+        "tts_engine": get_setting("TTS_ENGINE") or settings.TTS_ENGINE,
+        "openai_tts_model": get_setting("OPENAI_TTS_MODEL") or settings.OPENAI_TTS_MODEL,
+        "openai_tts_voice": get_setting("OPENAI_TTS_VOICE") or settings.OPENAI_TTS_VOICE,
+        "google_tts_voice": get_setting("GOOGLE_TTS_VOICE") or settings.GOOGLE_TTS_VOICE,
+        "tts_engine_available": _current_tts_capabilities(),
     }
 
 
@@ -158,11 +223,23 @@ async def update_settings(req: SettingsUpdateRequest):
     if req.openai_api_key is not None and req.openai_api_key != "••••••••":
         set_setting("OPENAI_API_KEY", req.openai_api_key)
 
-    return {
-        "status": "saved",
-        "gemini_model": req.gemini_model,
-        "openai_model": req.openai_model,
-    }
+    if req.evaluation_model:
+        set_setting("EVALUATION_MODEL", req.evaluation_model)
+    if req.evaluation_provider:
+        set_setting("EVALUATION_PROVIDER", req.evaluation_provider)
+
+    if req.tts_engine:
+        if req.tts_engine not in ("auto", "openai", "google", "local"):
+            raise HTTPException(status_code=400, detail=f"Invalid tts_engine: {req.tts_engine}")
+        set_setting("TTS_ENGINE", req.tts_engine)
+    if req.openai_tts_model:
+        set_setting("OPENAI_TTS_MODEL", req.openai_tts_model)
+    if req.openai_tts_voice:
+        set_setting("OPENAI_TTS_VOICE", req.openai_tts_voice)
+    if req.google_tts_voice:
+        set_setting("GOOGLE_TTS_VOICE", req.google_tts_voice)
+
+    return {"status": "saved"}
 
 
 class VerifyKeyRequest(BaseModel):

@@ -8,7 +8,6 @@ from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.frames.frames import (
     Frame,
-    InputAudioRawFrame,
     OutputAudioRawFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -17,11 +16,15 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     LLMTextFrame,
-    LLMFullResponseEndFrame
+    LLMFullResponseEndFrame,
+    MetricsFrame,
 )
+from pipecat.metrics.metrics import LLMUsageMetricsData
 from voxarena.agent import Agent
 from voxarena.config import ProviderConfig
+from voxarena.evaluators import ALWAYS_RUN, EXPECT_CHECKS
 from voxarena.manifest import RunManifest, TurnMetric
+from voxarena.pricing import estimate_cost
 from voxarena.tools import execute_tool
 
 
@@ -38,18 +41,6 @@ async def shared_tool_callback(params: FunctionCallParams) -> None:
         await params.result_callback({"error": str(e)})
 
 
-def _args_match(expected: Any, actual: Any) -> bool:
-    """Loosely compare an expected tool argument against the actual value, tolerating
-    case and numeric/string formatting differences (e.g. "Friday" vs "friday", 4 vs "4")."""
-    if actual is None:
-        return False
-    if isinstance(expected, str) and isinstance(actual, str):
-        return expected.strip().lower() == actual.strip().lower()
-    try:
-        return float(expected) == float(actual)
-    except (TypeError, ValueError):
-        return str(expected).strip().lower() == str(actual).strip().lower()
-
 class RunMetricsCollector(FrameProcessor):
     """Pipeline processor to capture symmetric, transport-level timestamps for latency analysis."""
     
@@ -60,13 +51,23 @@ class RunMetricsCollector(FrameProcessor):
         self.last_bot_speaking_state = False
         self.turn_completed_event = asyncio.Event()
         self.bot_started_speaking_event = asyncio.Event()
+        # Fires on FunctionCallResultFrame so the harness can wait for late
+        # tool-call frames (OpenAI Realtime emits the function-call event
+        # *after* LLMFullResponseEndFrame, unlike Gemini Live).
+        self.tool_call_completed_event = asyncio.Event()
         self.current_expect: Dict[str, Any] = {}
+        # Timestamp of the most recent OutputAudioRawFrame from the bot. Used by
+        # the barge-in handler to measure when the bot actually stops emitting
+        # audio (Gemini Live doesn't send LLMFullResponseEndFrame after an
+        # InterruptionFrame, so this is the only reliable stop signal).
+        self.last_bot_output_at: Optional[float] = None
 
     def on_input_injected(self, utterance_id: str, text: str, expect: Optional[Dict[str, Any]] = None):
         """Programmatically register a turn start from the harness."""
         now_ms = time.time() * 1000.0
         self.turn_completed_event.clear()
         self.bot_started_speaking_event.clear()
+        self.tool_call_completed_event.clear()
         self.current_expect = expect or {}
 
         self.current_turn = TurnMetric(
@@ -78,63 +79,38 @@ class RunMetricsCollector(FrameProcessor):
         logger.debug(f"[MetricsCollector] Turn {utterance_id} started at {now_ms:.2f} ms")
 
     def evaluate_turn(self):
-        """Score the just-completed turn against its expected tool call and response content."""
+        """Score the just-completed turn against its `expect` block by running every
+        applicable checker in EXPECT_CHECKS (voxarena/evaluators.py)."""
         turn = self.current_turn
         if not turn:
             return
 
         expect = self.current_expect
-        expected_tool = expect.get("tool")
-        expected_args = expect.get("args") or {}
-        actual_tool = turn.tool_call_details.get("name") if turn.tool_call_details else None
-        actual_args = (turn.tool_call_details.get("args") or {}) if turn.tool_call_details else {}
-
         notes = []
-        tool_correct = None
+        results: Dict[str, Optional[bool]] = {}
 
-        if expected_tool is None:
-            if actual_tool is not None:
-                tool_correct = False
-                turn.hallucination_count = (turn.hallucination_count or 0) + 1
-                notes.append(f"Unexpected tool call '{actual_tool}' (none expected).")
-        else:
-            if actual_tool != expected_tool:
-                tool_correct = False
-                notes.append(f"Expected tool '{expected_tool}', got '{actual_tool or 'none'}'.")
-            else:
-                tool_correct = True
-                for key, expected_val in expected_args.items():
-                    actual_val = actual_args.get(key)
-                    if not _args_match(expected_val, actual_val):
-                        tool_correct = False
-                        notes.append(f"Arg '{key}' mismatch: expected {expected_val!r}, got {actual_val!r}.")
+        for key, checker in EXPECT_CHECKS.items():
+            if key not in expect and key not in ALWAYS_RUN:
+                continue
+            passed, check_notes, hallucination_delta = checker(turn, expect)
+            results[key] = passed
+            notes.extend(check_notes)
+            if hallucination_delta:
+                turn.hallucination_count = (turn.hallucination_count or 0) + hallucination_delta
 
-        response_contains = expect.get("response_contains")
-        response_match = None
-        if response_contains:
-            transcript_lower = (turn.transcript_output or "").lower()
-            missing = [phrase for phrase in response_contains if phrase.lower() not in transcript_lower]
-            response_match = not missing
-            if missing:
-                notes.append(f"Response missing expected phrase(s): {', '.join(missing)}.")
-
-        turn.tool_call_correct = tool_correct
-        turn.response_match = response_match
-        turn.evaluation_passed = (tool_correct is not False) and (response_match is not False)
+        turn.tool_call_correct = results.get("tool")
+        turn.response_match = results.get("response_contains")
+        turn.evaluation_passed = all(passed is not False for passed in results.values())
         if notes:
             turn.evaluation_notes = " ".join(notes)
 
+        turn.cost_usd = estimate_cost(self.manifest.model, turn.prompt_tokens, turn.completion_tokens)
+
     async def process_frame(self, frame: Frame, direction) -> Frame:
         now_ms = time.time() * 1000.0
-        
-        # 1. Capture User Audio Injection (Input) - fallback only
-        if isinstance(frame, InputAudioRawFrame):
-            if not self.current_turn:
-                self.on_input_injected(f"u_{int(now_ms)}", "")
-                logger.debug(f"[MetricsCollector] Fallback Turn started. Input injected at {now_ms:.2f} ms")
 
         # 2. Capture Tool/Function Call events
-        elif isinstance(frame, FunctionCallInProgressFrame):
+        if isinstance(frame, FunctionCallInProgressFrame):
             if self.current_turn:
                 logger.debug(f"[MetricsCollector] Tool call detected for {frame.function_name}")
                 if not self.current_turn.tool_call_details:
@@ -150,6 +126,9 @@ class RunMetricsCollector(FrameProcessor):
                 self.current_turn.tool_call_details["result_received_at"] = now_ms
                 self.current_turn.tool_call_details["latency_ms"] = now_ms - call_at
                 logger.debug(f"[MetricsCollector] Tool call resolved in {now_ms - call_at:.2f} ms")
+            # Wake the harness even when current_turn is None — but the harness
+            # also reads current_turn before deciding what to do.
+            self.tool_call_completed_event.set()
 
         # 3. Capture Bot Output Audio (First Audio response)
         elif isinstance(frame, (OutputAudioRawFrame, BotStartedSpeakingFrame)):
@@ -157,7 +136,10 @@ class RunMetricsCollector(FrameProcessor):
                 self.current_turn.first_audio_received_at = now_ms
                 self.current_turn.time_to_first_audio_ms = now_ms - self.current_turn.input_sent_at
                 logger.info(f"[MetricsCollector] Time-to-First-Audio (TTFA): {self.current_turn.time_to_first_audio_ms:.2f} ms")
-            
+
+            if isinstance(frame, OutputAudioRawFrame):
+                self.last_bot_output_at = now_ms
+
             self.bot_started_speaking_event.set()
             if not self.last_bot_speaking_state:
                 self.last_bot_speaking_state = True
@@ -183,6 +165,18 @@ class RunMetricsCollector(FrameProcessor):
         elif isinstance(frame, LLMTextFrame):
             if self.current_turn:
                 self.current_turn.transcript_output += frame.text
+
+        # 6b. Capture LLM token usage for cost estimation
+        elif isinstance(frame, MetricsFrame):
+            if self.current_turn:
+                for entry in frame.data:
+                    if isinstance(entry, LLMUsageMetricsData):
+                        usage = entry.value
+                        self.current_turn.prompt_tokens = usage.prompt_tokens
+                        self.current_turn.completion_tokens = usage.completion_tokens
+                        self.current_turn.cost_usd = estimate_cost(
+                            self.manifest.model, usage.prompt_tokens, usage.completion_tokens
+                        )
 
         # 6. Capture response completion
         elif isinstance(frame, LLMFullResponseEndFrame):

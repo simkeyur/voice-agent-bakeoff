@@ -11,7 +11,6 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     OutputAudioRawFrame,
     EndFrame,
-    InterruptionFrame,
     StopTaskFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame
@@ -19,7 +18,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.pipeline.runner import PipelineRunner
 
 from voxarena.agent import Agent
@@ -28,6 +27,7 @@ from voxarena.config import ProviderConfig, settings
 from voxarena.database import load_utterances_from_db
 from voxarena.manifest import RunManifest, TurnMetric, AggregateMetrics
 from voxarena.providers import make_adapter
+from voxarena.turn_behaviors import BEHAVIOR_HANDLERS, TurnContext, handle_sequential
 
 class AudioInjectionProcessor(FrameProcessor):
     """Processor designed to stream raw PCM audio frames into the pipeline in real-time."""
@@ -133,6 +133,156 @@ class AudioCaptureProcessor(FrameProcessor):
         return output_path
 
 
+def stitch_call_audio(manifest: RunManifest, run_dir: str):
+    """
+    Stitches user-input and bot-response WAV files into a single stereo WAV file
+    at 24000 Hz, 16-bit signed PCM.
+    Left channel = User, Right channel = Bot.
+    """
+    import array
+
+    turns = manifest.turns
+    if not turns:
+        logger.info("[Stitch] No turns to stitch.")
+        return
+
+    # Find the start time (first turn's input_sent_at)
+    start_time_ms = turns[0].input_sent_at
+    if not start_time_ms:
+        logger.info("[Stitch] Start time missing, cannot stitch.")
+        return
+
+    # Gather all segments to mix: (file_path, start_time_sec, channel)
+    # channel: 0 = Left (User), 1 = Right (Bot)
+    segments = []
+
+    for turn in turns:
+        # User input audio
+        if turn.audio_input_path and os.path.exists(turn.audio_input_path):
+            start_sec = (turn.input_sent_at - start_time_ms) / 1000.0
+            if start_sec >= 0:
+                segments.append((turn.audio_input_path, start_sec, 0))
+
+        # Bot response audio
+        if turn.audio_output_path and os.path.exists(turn.audio_output_path) and turn.first_audio_received_at:
+            start_sec = (turn.first_audio_received_at - start_time_ms) / 1000.0
+            if start_sec >= 0:
+                segments.append((turn.audio_output_path, start_sec, 1))
+
+    if not segments:
+        logger.info("[Stitch] No audio segments found to stitch.")
+        return
+
+    # Determine total duration
+    max_end_time = 0.0
+    valid_segments = []
+
+    for path, start_sec, chan in segments:
+        try:
+            with wave.open(path, "rb") as wf:
+                framerate = wf.getframerate()
+                nframes = wf.getnframes()
+                duration = nframes / framerate if framerate else 0.0
+                if duration > 0:
+                    max_end_time = max(max_end_time, start_sec + duration)
+                    valid_segments.append((path, start_sec, chan, duration))
+        except Exception as e:
+            logger.warning(f"[Stitch] Error reading WAV duration for {path}: {e}")
+
+    if max_end_time <= 0:
+        logger.info("[Stitch] Total stitched duration is 0.")
+        return
+
+    # Add a 1.0-second tail buffer
+    total_duration = max_end_time + 1.0
+    target_rate = 24000
+    num_samples = int(total_duration * target_rate)
+
+    # Initialize left (user) and right (bot) channels
+    left_channel = array.array('h', [0] * num_samples)
+    right_channel = array.array('h', [0] * num_samples)
+
+    # Helper function to read and resample WAV to 24kHz mono
+    def read_and_resample(file_path: str) -> array.array:
+        with wave.open(file_path, "rb") as wf:
+            nchannels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            framerate = wf.getframerate()
+            frames = wf.readframes(wf.getnframes())
+
+        # Unpack PCM
+        if sampwidth == 2:
+            arr = array.array('h', frames)
+        elif sampwidth == 1:
+            arr = array.array('h', [(int(b) - 128) * 256 for b in frames])
+        else:
+            arr = array.array('h', frames)
+
+        # Mix down to mono
+        if nchannels > 1:
+            mono = array.array('h', [0] * (len(arr) // nchannels))
+            for i in range(len(mono)):
+                mono[i] = sum(arr[i * nchannels + c] for c in range(nchannels)) // nchannels
+            arr = mono
+
+        # Resample using simple linear interpolation
+        if framerate != target_rate:
+            ratio = framerate / target_rate
+            n_out = int(len(arr) / ratio)
+            out_arr = array.array('h', [0] * n_out)
+            for i in range(n_out):
+                pos = i * ratio
+                idx = int(pos)
+                frac = pos - idx
+                if idx >= len(arr) - 1:
+                    out_arr[i] = arr[-1]
+                else:
+                    out_arr[i] = int(arr[idx] * (1 - frac) + arr[idx + 1] * frac)
+            arr = out_arr
+
+        return arr
+
+    # Mix each segment into the appropriate channel
+    for path, start_sec, chan, duration in valid_segments:
+        try:
+            samples = read_and_resample(path)
+            start_idx = int(start_sec * target_rate)
+            channel = left_channel if chan == 0 else right_channel
+
+            for i in range(len(samples)):
+                idx = start_idx + i
+                if idx >= len(channel):
+                    break
+                val = channel[idx] + samples[i]
+                if val > 32767:
+                    channel[idx] = 32767
+                elif val < -32768:
+                    channel[idx] = -32768
+                else:
+                    channel[idx] = val
+        except Exception as e:
+            logger.error(f"[Stitch] Error mixing segment {path}: {e}")
+
+    # Interleave channels to stereo
+    interleaved = array.array('h', [0] * (num_samples * 2))
+    for i in range(num_samples):
+        interleaved[i * 2] = left_channel[i]
+        interleaved[i * 2 + 1] = right_channel[i]
+
+    # Write stitched WAV file
+    output_path = os.path.join(run_dir, "stitched.wav")
+    try:
+        with wave.open(output_path, "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(target_rate)
+            wf.writeframes(interleaved.tobytes())
+        logger.success(f"[Stitch] Stitched call audio successfully saved to {output_path}")
+        manifest.stitched_audio_path = output_path
+    except Exception as e:
+        logger.error(f"[Stitch] Failed to write stitched audio file: {e}")
+
+
 class EvaluationHarness:
     """Manages the full automated execution of the 20-utterance test suite against a provider."""
     
@@ -234,7 +384,9 @@ class EvaluationHarness:
         ])
         
         runner = PipelineRunner()
-        task = self.task = PipelineTask(pipeline)
+        task = self.task = PipelineTask(
+            pipeline, params=PipelineParams(enable_metrics=True, enable_usage_metrics=True)
+        )
         injector.task = task
         
         # Start Pipecat pipeline task in background
@@ -271,6 +423,8 @@ class EvaluationHarness:
         session_timeout_sec = max(60.0, len(utterances) * 30.0)
 
         async def _drive_turns():
+            pending_injection_task: Optional[asyncio.Task] = None
+
             for i, utt in enumerate(utterances):
                 if self.stop_requested:
                     logger.info("[Harness] Stop requested before turn injection, breaking.")
@@ -286,29 +440,31 @@ class EvaluationHarness:
                 await self.manifest.save_progress_async(collector.current_turn)
 
                 audio_path = utt["_audio_path"]
-                injection_task = asyncio.create_task(injector.inject_wav(audio_path))
+                if collector.current_turn:
+                    collector.current_turn.audio_input_path = audio_path
 
-                turn_timed_out = False
-                try:
-                    await asyncio.wait_for(collector.turn_completed_event.wait(), timeout=15.0)
-                except asyncio.TimeoutError:
-                    turn_timed_out = True
-                    logger.warning(
-                        f"[Harness] Timeout waiting for response completion on {utt_id}. "
-                        f"Sending InterruptionFrame to abort in-flight response."
-                    )
-                    # Tell the Pipecat realtime service to cancel the current
-                    # response so its tail frames don't leak into the next turn.
-                    try:
-                        await task.queue_frame(InterruptionFrame())
-                    except Exception as e:
-                        logger.error(f"[Harness] Failed to queue InterruptionFrame: {e}")
-                    collector.turn_completed_event.set()
-                    # Give the cancellation a moment to propagate downstream.
-                    await asyncio.sleep(1.0)
+                if pending_injection_task is not None:
+                    injection_task = pending_injection_task
+                    pending_injection_task = None
+                else:
+                    injection_task = asyncio.create_task(injector.inject_wav(audio_path))
 
-                injector.stop_injection()
-                await injection_task
+                next_utt = utterances[i + 1] if i + 1 < len(utterances) else None
+                behavior_type = (
+                    (next_utt.get("behavior") or {}).get("type", "sequential")
+                    if next_utt else "sequential"
+                )
+                handler = BEHAVIOR_HANDLERS.get(behavior_type, handle_sequential)
+
+                ctx = TurnContext(
+                    task=task,
+                    injector=injector,
+                    collector=collector,
+                    manifest=self.manifest,
+                    utt=utt,
+                    utt_id=utt_id,
+                )
+                turn_timed_out, pending_injection_task = await handler(ctx, injection_task, next_utt)
 
                 if self.stop_requested:
                     logger.info("[Harness] Stop requested during turn wait, breaking.")
@@ -325,6 +481,14 @@ class EvaluationHarness:
                         )
 
                 collector.evaluate_turn()
+
+                if collector.current_turn and collector.current_turn.interruption_sent_at is not None:
+                    existing = collector.current_turn.evaluation_notes or ""
+                    suffix = "Interrupted by next turn (barge-in)."
+                    collector.current_turn.evaluation_notes = (
+                        f"{existing} {suffix}".strip() if existing else suffix
+                    )
+
                 await self.manifest.save_progress_async(collector.current_turn)
 
                 # Null current_turn so any straggler frames between turns are
@@ -366,6 +530,8 @@ class EvaluationHarness:
                 self.manifest.status = "completed"
 
             self.compile_aggregates()
+            # Stitch call audio in a background thread to keep event loop responsive
+            await asyncio.to_thread(stitch_call_audio, self.manifest, self.run_dir)
             await self.manifest.save_async()
             logger.info(f"[Harness] Manifest saved to {self.manifest.manifest_path}")
 
@@ -396,6 +562,7 @@ class EvaluationHarness:
             if evaluated else None
         )
         hallucination_count = sum(t.hallucination_count or 0 for t in turns)
+        total_cost = sum(t.cost_usd for t in turns if t.cost_usd is not None)
 
         self.manifest.metrics = AggregateMetrics(
             total_turns=len(turns),
@@ -403,4 +570,5 @@ class EvaluationHarness:
             average_interruption_stop_latency_ms=avg_interruption,
             tool_call_accuracy_rate=tool_accuracy,
             hallucination_count=hallucination_count,
+            total_cost_usd=total_cost,
         )
