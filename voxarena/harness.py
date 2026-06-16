@@ -133,6 +133,156 @@ class AudioCaptureProcessor(FrameProcessor):
         return output_path
 
 
+def stitch_call_audio(manifest: RunManifest, run_dir: str):
+    """
+    Stitches user-input and bot-response WAV files into a single stereo WAV file
+    at 24000 Hz, 16-bit signed PCM.
+    Left channel = User, Right channel = Bot.
+    """
+    import array
+
+    turns = manifest.turns
+    if not turns:
+        logger.info("[Stitch] No turns to stitch.")
+        return
+
+    # Find the start time (first turn's input_sent_at)
+    start_time_ms = turns[0].input_sent_at
+    if not start_time_ms:
+        logger.info("[Stitch] Start time missing, cannot stitch.")
+        return
+
+    # Gather all segments to mix: (file_path, start_time_sec, channel)
+    # channel: 0 = Left (User), 1 = Right (Bot)
+    segments = []
+
+    for turn in turns:
+        # User input audio
+        if turn.audio_input_path and os.path.exists(turn.audio_input_path):
+            start_sec = (turn.input_sent_at - start_time_ms) / 1000.0
+            if start_sec >= 0:
+                segments.append((turn.audio_input_path, start_sec, 0))
+
+        # Bot response audio
+        if turn.audio_output_path and os.path.exists(turn.audio_output_path) and turn.first_audio_received_at:
+            start_sec = (turn.first_audio_received_at - start_time_ms) / 1000.0
+            if start_sec >= 0:
+                segments.append((turn.audio_output_path, start_sec, 1))
+
+    if not segments:
+        logger.info("[Stitch] No audio segments found to stitch.")
+        return
+
+    # Determine total duration
+    max_end_time = 0.0
+    valid_segments = []
+
+    for path, start_sec, chan in segments:
+        try:
+            with wave.open(path, "rb") as wf:
+                framerate = wf.getframerate()
+                nframes = wf.getnframes()
+                duration = nframes / framerate if framerate else 0.0
+                if duration > 0:
+                    max_end_time = max(max_end_time, start_sec + duration)
+                    valid_segments.append((path, start_sec, chan, duration))
+        except Exception as e:
+            logger.warning(f"[Stitch] Error reading WAV duration for {path}: {e}")
+
+    if max_end_time <= 0:
+        logger.info("[Stitch] Total stitched duration is 0.")
+        return
+
+    # Add a 1.0-second tail buffer
+    total_duration = max_end_time + 1.0
+    target_rate = 24000
+    num_samples = int(total_duration * target_rate)
+
+    # Initialize left (user) and right (bot) channels
+    left_channel = array.array('h', [0] * num_samples)
+    right_channel = array.array('h', [0] * num_samples)
+
+    # Helper function to read and resample WAV to 24kHz mono
+    def read_and_resample(file_path: str) -> array.array:
+        with wave.open(file_path, "rb") as wf:
+            nchannels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            framerate = wf.getframerate()
+            frames = wf.readframes(wf.getnframes())
+
+        # Unpack PCM
+        if sampwidth == 2:
+            arr = array.array('h', frames)
+        elif sampwidth == 1:
+            arr = array.array('h', [(int(b) - 128) * 256 for b in frames])
+        else:
+            arr = array.array('h', frames)
+
+        # Mix down to mono
+        if nchannels > 1:
+            mono = array.array('h', [0] * (len(arr) // nchannels))
+            for i in range(len(mono)):
+                mono[i] = sum(arr[i * nchannels + c] for c in range(nchannels)) // nchannels
+            arr = mono
+
+        # Resample using simple linear interpolation
+        if framerate != target_rate:
+            ratio = framerate / target_rate
+            n_out = int(len(arr) / ratio)
+            out_arr = array.array('h', [0] * n_out)
+            for i in range(n_out):
+                pos = i * ratio
+                idx = int(pos)
+                frac = pos - idx
+                if idx >= len(arr) - 1:
+                    out_arr[i] = arr[-1]
+                else:
+                    out_arr[i] = int(arr[idx] * (1 - frac) + arr[idx + 1] * frac)
+            arr = out_arr
+
+        return arr
+
+    # Mix each segment into the appropriate channel
+    for path, start_sec, chan, duration in valid_segments:
+        try:
+            samples = read_and_resample(path)
+            start_idx = int(start_sec * target_rate)
+            channel = left_channel if chan == 0 else right_channel
+
+            for i in range(len(samples)):
+                idx = start_idx + i
+                if idx >= len(channel):
+                    break
+                val = channel[idx] + samples[i]
+                if val > 32767:
+                    channel[idx] = 32767
+                elif val < -32768:
+                    channel[idx] = -32768
+                else:
+                    channel[idx] = val
+        except Exception as e:
+            logger.error(f"[Stitch] Error mixing segment {path}: {e}")
+
+    # Interleave channels to stereo
+    interleaved = array.array('h', [0] * (num_samples * 2))
+    for i in range(num_samples):
+        interleaved[i * 2] = left_channel[i]
+        interleaved[i * 2 + 1] = right_channel[i]
+
+    # Write stitched WAV file
+    output_path = os.path.join(run_dir, "stitched.wav")
+    try:
+        with wave.open(output_path, "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(target_rate)
+            wf.writeframes(interleaved.tobytes())
+        logger.success(f"[Stitch] Stitched call audio successfully saved to {output_path}")
+        manifest.stitched_audio_path = output_path
+    except Exception as e:
+        logger.error(f"[Stitch] Failed to write stitched audio file: {e}")
+
+
 class EvaluationHarness:
     """Manages the full automated execution of the 20-utterance test suite against a provider."""
     
@@ -380,6 +530,8 @@ class EvaluationHarness:
                 self.manifest.status = "completed"
 
             self.compile_aggregates()
+            # Stitch call audio in a background thread to keep event loop responsive
+            await asyncio.to_thread(stitch_call_audio, self.manifest, self.run_dir)
             await self.manifest.save_async()
             logger.info(f"[Harness] Manifest saved to {self.manifest.manifest_path}")
 

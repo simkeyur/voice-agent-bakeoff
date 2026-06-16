@@ -28,16 +28,22 @@ class SaffronLeafEvaluator:
 
     def _call_llm_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         """Utility to invoke LLM and request structured JSON output."""
-        if not self.api_key:
-            logger.warning("No API key available for Evaluator. Returning mock success evaluation.")
+        eval_model = get_setting("EVALUATION_MODEL") or settings.EVALUATION_MODEL
+        eval_provider = get_setting("EVALUATION_PROVIDER") or settings.EVALUATION_PROVIDER or ("openai" if "gpt" in eval_model.lower() else "gemini")
+
+        from voxarena.providers import api_key_env
+        env_name = api_key_env(eval_provider)
+        api_key = get_setting(env_name)
+
+        if not api_key:
+            logger.warning(f"No API key available for Evaluator ({eval_provider}). Returning mock success evaluation.")
             return {"success": True, "mocked": True}
             
         try:
-            if self.provider == "gemini":
+            if eval_provider == "gemini":
                 from google import genai
                 from google.genai import types
-                eval_model = get_setting("GEMINI_EVAL_MODEL") or settings.GEMINI_EVAL_MODEL
-                client = genai.Client(api_key=self.api_key)
+                client = genai.Client(api_key=api_key)
                 response = client.models.generate_content(
                     model=eval_model,
                     contents=user_prompt,
@@ -49,10 +55,9 @@ class SaffronLeafEvaluator:
                 )
                 return json.loads(response.text)
 
-            elif self.provider == "openai":
+            elif eval_provider == "openai":
                 from openai import OpenAI
-                eval_model = get_setting("OPENAI_EVAL_MODEL") or settings.OPENAI_EVAL_MODEL
-                client = OpenAI(api_key=self.api_key)
+                client = OpenAI(api_key=api_key)
                 response = client.chat.completions.create(
                     model=eval_model,
                     messages=[

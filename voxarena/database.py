@@ -71,6 +71,8 @@ def init_db():
         runs_cols = {row["name"] for row in conn.execute("PRAGMA table_info(runs);").fetchall()}
         if "template_id" not in runs_cols:
             conn.execute("ALTER TABLE runs ADD COLUMN template_id TEXT;")
+        if "stitched_audio_path" not in runs_cols:
+            conn.execute("ALTER TABLE runs ADD COLUMN stitched_audio_path TEXT;")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS turns (
@@ -158,13 +160,14 @@ _RUN_UPSERT_SQL = """
     INSERT INTO runs (
         run_id, provider, model, transport, prompt_version, prompt_hash,
         tool_schema_version, tool_schema_hash, template_id, created_at,
-        completed_at, status, error_message, metrics
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        completed_at, status, error_message, metrics, stitched_audio_path
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id) DO UPDATE SET
         completed_at = excluded.completed_at,
         status = excluded.status,
         error_message = excluded.error_message,
-        metrics = excluded.metrics;
+        metrics = excluded.metrics,
+        stitched_audio_path = excluded.stitched_audio_path;
 """
 
 _TURN_UPSERT_SQL = """
@@ -207,6 +210,7 @@ def _run_row(manifest: RunManifest) -> tuple:
         manifest.prompt_version, manifest.prompt_hash, manifest.tool_schema_version,
         manifest.tool_schema_hash, manifest.template_id, manifest.created_at,
         manifest.completed_at, manifest.status, manifest.error_message, metrics_json,
+        manifest.stitched_audio_path,
     )
 
 
@@ -336,6 +340,7 @@ def load_run_manifest(run_id: str) -> Optional[RunManifest]:
             error_message=run_row["error_message"],
             turns=turns,
             metrics=metrics,
+            stitched_audio_path=run_row["stitched_audio_path"] if "stitched_audio_path" in run_row.keys() else None,
         )
         manifest.manifest_path = os.path.join(settings.RESULTS_DIR, run_row["provider"], run_id, "manifest.json")
         return manifest

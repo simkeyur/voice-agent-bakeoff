@@ -174,9 +174,9 @@ class SettingsUpdateRequest(BaseModel):
     openai_model: str
     google_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
-    # Evaluation models (optional — keep existing values if omitted)
-    gemini_eval_model: Optional[str] = None
-    openai_eval_model: Optional[str] = None
+    # Evaluation model (optional — keep existing values if omitted)
+    evaluation_model: Optional[str] = None
+    evaluation_provider: Optional[str] = None
     # TTS configuration (optional)
     tts_engine: Optional[str] = None
     openai_tts_model: Optional[str] = None
@@ -203,8 +203,8 @@ async def get_settings():
         "openai_model": get_setting("OPENAI_MODEL") or settings.OPENAI_MODEL,
         "google_api_key": "••••••••" if google_key else "",
         "openai_api_key": "••••••••" if openai_key else "",
-        "gemini_eval_model": get_setting("GEMINI_EVAL_MODEL") or settings.GEMINI_EVAL_MODEL,
-        "openai_eval_model": get_setting("OPENAI_EVAL_MODEL") or settings.OPENAI_EVAL_MODEL,
+        "evaluation_model": get_setting("EVALUATION_MODEL") or settings.EVALUATION_MODEL,
+        "evaluation_provider": get_setting("EVALUATION_PROVIDER") or settings.EVALUATION_PROVIDER,
         "tts_engine": get_setting("TTS_ENGINE") or settings.TTS_ENGINE,
         "openai_tts_model": get_setting("OPENAI_TTS_MODEL") or settings.OPENAI_TTS_MODEL,
         "openai_tts_voice": get_setting("OPENAI_TTS_VOICE") or settings.OPENAI_TTS_VOICE,
@@ -223,10 +223,10 @@ async def update_settings(req: SettingsUpdateRequest):
     if req.openai_api_key is not None and req.openai_api_key != "••••••••":
         set_setting("OPENAI_API_KEY", req.openai_api_key)
 
-    if req.gemini_eval_model:
-        set_setting("GEMINI_EVAL_MODEL", req.gemini_eval_model)
-    if req.openai_eval_model:
-        set_setting("OPENAI_EVAL_MODEL", req.openai_eval_model)
+    if req.evaluation_model:
+        set_setting("EVALUATION_MODEL", req.evaluation_model)
+    if req.evaluation_provider:
+        set_setting("EVALUATION_PROVIDER", req.evaluation_provider)
 
     if req.tts_engine:
         if req.tts_engine not in ("auto", "openai", "google", "local"):
