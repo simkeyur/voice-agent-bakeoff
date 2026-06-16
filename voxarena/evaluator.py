@@ -76,11 +76,15 @@ class LLMEvaluator:
         text_input: str,
         transcript: str,
         expected_intents: List[str],
+        partial: bool = False,
     ) -> Tuple[Optional[bool], str]:
         """Semantically judge whether the agent's reply satisfies the expected intents.
 
         Returns ``(passed, reasoning)``. Returns ``(None, reason)`` when the LLM
         is unavailable so callers can keep the rule-based result instead.
+        When ``partial`` is True, the transcript was cut short by a barge-in —
+        the LLM should judge whether the agent was on track to address the
+        intents, not require completion.
         """
         system = (
             "You are an automated QA evaluator for a voice agent.\n"
@@ -88,9 +92,16 @@ class LLMEvaluator:
             "The phrases express semantic intent — judge meaning, not exact wording.\n"
             'Output JSON: {"passed": boolean, "reasoning": string}'
         )
+        if partial:
+            system += (
+                "\nThe transcript was cut short before the agent finished. "
+                "Pass if the partial response is clearly on track to satisfy the intents "
+                "(e.g. acknowledging the request, calling the right tool, beginning the answer); "
+                "fail only if it's off-topic or contradicts the intent."
+            )
         user = (
             f'User said: "{text_input}"\n'
-            f'Agent replied: "{transcript}"\n'
+            f'Agent {"started replying" if partial else "replied"}: "{transcript}"\n'
             f"Expected intents: {json.dumps(expected_intents)}"
         )
         result = self._call_llm(system, user)
@@ -118,12 +129,14 @@ class LLMEvaluator:
             intents = expect.get("response_contains")
             if not intents:
                 continue
-            # Skip turns cut short by barge-in — transcript is incomplete.
-            if turn.interruption_sent_at is not None:
+            # Only skip if there's literally no transcript to judge.
+            transcript = turn.transcript_output or ""
+            if not transcript.strip():
                 continue
 
+            partial = turn.interruption_sent_at is not None
             passed, reasoning = self.evaluate_response(
-                turn.text_input, turn.transcript_output or "", intents
+                turn.text_input, transcript, intents, partial=partial
             )
             if passed is None:
                 # LLM unavailable — leave rule-based result intact.
