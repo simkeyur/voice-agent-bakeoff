@@ -1,113 +1,54 @@
 # Phase 1 — Headless CLI & CI Mode
 
-**Target version:** v0.2  
-**Impact:** Unlocks the single biggest use case — running evals in a CI pipeline without a browser.
+**Status: ✅ DONE**  
+**Shipped in:** v0.1.x
 
 ---
 
-## Problem
+## What exists
 
-Right now VoxArena requires a human watching the UI to start a run. This means:
-
-- Can't run in GitHub Actions / CircleCI / Jenkins
-- Can't gate a PR on eval regression
-- Can't schedule nightly benchmarks
-- The tool is invisible to teams that live in the terminal
-
-## Goal
+VoxArena already has a full headless CLI (`voxarena/cli.py`). This phase is complete.
 
 ```bash
-# Run an eval from the terminal, get structured output
-voxarena run --template finance --provider gemini --turns 10 --output results.json
+# Run a single provider eval
+voxarena run --provider gemini --script script/utterances.json --num-turns 10 --output results.json
 
-# Exit code 0 = pass, 1 = fail (based on thresholds)
-voxarena run --template finance --min-accuracy 0.85 --max-ttfa 2500
+# Side-by-side comparison
+voxarena compare --providers gemini,openai --script script/utterances.json
+
+# Threshold-based pass/fail for CI
+voxarena run --provider gemini \
+  --min-tool-accuracy 0.85 \
+  --max-hallucinations 2 \
+  --max-avg-ttfa-ms 2500
+
+# JUnit XML output for CI test reporters
+voxarena run --provider gemini --junit results.xml
 ```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `voxarena run` | Single-provider eval with exit 0/1 based on thresholds |
+| `voxarena compare` | Parallel Gemini vs OpenAI eval |
+| `voxarena report` | Print summary of a past run from results DB |
+| `voxarena ui` | Launch the browser UI |
+| `voxarena config` | Show/set config (API keys, models) |
+
+### CI features already working
+
+- Exit code `0` = pass, `1` = threshold failure, `2` = runtime error
+- `--output` writes structured JSON
+- `--junit` writes JUnit XML (compatible with GitHub Actions test reporter)
+- `--min-tool-accuracy`, `--max-hallucinations`, `--max-avg-ttfa-ms` threshold flags
+- `direct-injection` transport works without audio hardware (default for headless)
 
 ---
 
-## What to Build
+## What's still missing (follow-on improvements)
 
-### 1. `voxarena run` CLI command
-
-Add a `run` subcommand to `voxarena.cli`:
-
-```
-voxarena run [OPTIONS]
-
-Options:
-  --template TEXT       Template ID or name to run  [required]
-  --provider TEXT       gemini | openai  [default: gemini]
-  --model TEXT          Model override (default: from config)
-  --transport TEXT      direct-injection | webrtc-local  [default: direct-injection]
-  --turns INT           Number of turns to run  [default: all]
-  --output PATH         Write JSON results to this file
-  --min-accuracy FLOAT  Fail if tool-call accuracy drops below threshold
-  --max-ttfa INT        Fail if median TTFA exceeds threshold (ms)
-  --quiet               Suppress progress output (just exit code)
-```
-
-### 2. Structured JSON output
-
-```json
-{
-  "run_id": "run_1234_abcd",
-  "provider": "gemini",
-  "model": "gemini-3.1-flash-live-preview",
-  "template": "finance",
-  "started_at": "2026-06-15T23:00:00Z",
-  "duration_ms": 18400,
-  "summary": {
-    "turns_total": 10,
-    "turns_completed": 10,
-    "tool_call_accuracy": 0.90,
-    "hallucination_rate": 0.05,
-    "ttfa_median_ms": 1820,
-    "ttfa_p95_ms": 2340
-  },
-  "turns": [ ... ]
-}
-```
-
-### 3. Exit codes for CI
-
-| Code | Meaning |
-|------|---------|
-| 0 | All turns completed, all thresholds passed |
-| 1 | One or more threshold checks failed |
-| 2 | Run did not complete (timeout, API error) |
-
-### 4. GitHub Actions example (ship in docs)
-
-```yaml
-- name: Run VoxArena eval
-  run: |
-    voxarena run \
-      --template finance \
-      --provider gemini \
-      --min-accuracy 0.85 \
-      --output eval-results.json
-
-- name: Upload eval results
-  uses: actions/upload-artifact@v4
-  with:
-    name: eval-results
-    path: eval-results.json
-```
-
----
-
-## Implementation Notes
-
-- The existing `POST /api/run` + polling loop already works; the CLI just needs to call it and block.
-- `direct-injection` transport works without audio hardware — make it the default for headless mode.
-- Progress output should go to stderr so stdout can be piped to `jq`.
-- Config (API keys, model) should be readable from env vars (`GEMINI_API_KEY`, `OPENAI_API_KEY`) so no `voxarena.db` is needed in CI.
-
----
-
-## Success Criteria
-
-- `voxarena run --template finance --provider gemini` works from a fresh Docker container with only `GEMINI_API_KEY` set.
-- Exit code is non-zero when accuracy drops below threshold.
-- A GitHub Actions workflow in `examples/` demonstrates it end-to-end.
+- **`--template` flag** — currently uses `--script <path>`. Should accept a template ID from the DB (`voxarena run --provider gemini --template finance`) so headless mode aligns with the UI's template system.
+- **GitHub Actions example** — a copy-paste `.github/workflows/voxarena.yml` in `examples/` would help adoption.
+- **`voxarena doctor`** — diagnoses missing API keys, ffmpeg, DB state before the user hits a runtime error.
+- **Env var config** — `GEMINI_API_KEY` / `OPENAI_API_KEY` env vars for CI environments where writing a config file isn't practical.
