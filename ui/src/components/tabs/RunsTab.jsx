@@ -78,11 +78,58 @@ export default function RunsTab({ ctx }) {
   );
 }
 
+function responseScore(turns) {
+  const scored = (turns || []).filter(t => t.response_match !== null && t.response_match !== undefined);
+  if (!scored.length) return null;
+  return scored.filter(t => t.response_match).length / scored.length;
+}
+
+function MetricTile({ label, value, tone }) {
+  const color = tone === 'error' ? 'var(--error)' : 'inherit';
+  return (
+    <div style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--accent-light)' }}>
+      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+        {label}
+      </div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 600, color }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function CheckPill({ name, passed, fullName }) {
+  const title = fullName || name;
+  if (passed === null || passed === undefined) {
+    return (
+      <span title={`${title}: not evaluated`}
+        style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, background: 'var(--accent-light)', color: 'var(--muted)', fontWeight: 600, letterSpacing: 0.3 }}>
+        {name}
+      </span>
+    );
+  }
+  return (
+    <span title={`${title}: ${passed ? 'pass' : 'fail'}`}
+      style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, background: passed ? 'var(--success, #16a34a)' : 'var(--error)', color: '#fff', fontWeight: 700, letterSpacing: 0.3 }}>
+      {name}
+    </span>
+  );
+}
+
+function EvalNotes({ notes }) {
+  if (!notes) return '—';
+  const text = notes.replace(/\[(LLM|Eval)\]\s*/g, '').trim();
+  return <span>{text || '—'}</span>;
+}
+
 function ComparisonView({ activeComparison, compareRunIds, logs, logsEndRef }) {
   const r1 = activeComparison.run1;
   const r2 = activeComparison.run2;
   const m1 = r1.metrics || {};
   const m2 = r2.metrics || {};
+
+  const rs1 = responseScore(r1.turns);
+  const rs2 = responseScore(r2.turns);
 
   const ttfaWinner = (m1.average_ttfa_ms != null && m2.average_ttfa_ms != null)
     ? (m1.average_ttfa_ms < m2.average_ttfa_ms ? r1.run_id : (m2.average_ttfa_ms < m1.average_ttfa_ms ? r2.run_id : null))
@@ -96,12 +143,15 @@ function ComparisonView({ activeComparison, compareRunIds, logs, logsEndRef }) {
   const costWinner = (m1.total_cost_usd != null && m2.total_cost_usd != null)
     ? (m1.total_cost_usd < m2.total_cost_usd ? r1.run_id : (m2.total_cost_usd < m1.total_cost_usd ? r2.run_id : null))
     : null;
+  const respWinner = (rs1 != null && rs2 != null)
+    ? (rs1 > rs2 ? r1.run_id : (rs2 > rs1 ? r2.run_id : null))
+    : null;
 
   const ttfaDelta = (m1.average_ttfa_ms != null && m2.average_ttfa_ms != null)
     ? Math.abs(m1.average_ttfa_ms - m2.average_ttfa_ms).toFixed(0)
     : null;
 
-  const winners = { ttfa: ttfaWinner, acc: accWinner, hall: hallWinner, cost: costWinner, ttfaDelta };
+  const winners = { ttfa: ttfaWinner, acc: accWinner, hall: hallWinner, cost: costWinner, resp: respWinner, ttfaDelta };
   const showLiveLogs = !!compareRunIds || r1.status === 'running' || r2.status === 'running';
 
   return (
@@ -169,11 +219,18 @@ function ComparisonView({ activeComparison, compareRunIds, logs, logsEndRef }) {
   );
 }
 
-function Metric({ label, value, isWinner, tone, delta }) {
+function Metric({ label, value, isWinner, tone, delta, badge }) {
   const color = tone === 'error' ? 'var(--error)' : (isWinner ? 'var(--fg)' : 'var(--muted)');
   return (
     <div>
-      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4, display: 'flex', alignItems: 'center', gap: 4 }}>
+        {label}
+        {badge && (
+          <span style={{ fontSize: 8, fontWeight: 700, background: 'var(--color-primary)', color: '#fff', borderRadius: 3, padding: '0 4px', letterSpacing: 0.3 }}>
+            {badge}
+          </span>
+        )}
+      </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
         <span style={{ fontWeight: isWinner ? 700 : 500, fontSize: 16, fontFamily: 'var(--font-mono)', color }}>
           {value}
@@ -192,6 +249,8 @@ function SummaryCard({ run, winners }) {
   const isAccW = winners.acc === run.run_id;
   const isHallW = winners.hall === run.run_id;
   const isCostW = winners.cost === run.run_id;
+  const isRespW = winners.resp === run.run_id;
+  const myRs = responseScore(run.turns);
   return (
     <div className="comparison-card">
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -201,7 +260,7 @@ function SummaryCard({ run, winners }) {
         <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--muted)' }}>{run.model}</span>
       </div>
       <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{run.run_id}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 10 }}>
         <Metric
           label="Avg TTFA"
           value={m.average_ttfa_ms != null ? `${m.average_ttfa_ms.toFixed(0)} ms` : '—'}
@@ -212,6 +271,11 @@ function SummaryCard({ run, winners }) {
           label="Tool Accuracy"
           value={m.tool_call_accuracy_rate != null ? `${(m.tool_call_accuracy_rate * 100).toFixed(0)}%` : '—'}
           isWinner={isAccW}
+        />
+        <Metric
+          label="Response Score"
+          value={myRs != null ? `${(myRs * 100).toFixed(0)}%` : '—'}
+          isWinner={isRespW}
         />
         <Metric
           label="Hallucinations"
@@ -259,7 +323,7 @@ function TurnCell({ run, turn }) {
       )}
       {turn.evaluation_notes && (
         <div style={{ fontSize: 11, color: 'var(--muted)', background: 'rgba(0,0,0,0.05)', padding: '6px 10px', borderRadius: 6, marginTop: 6 }}>
-          {turn.evaluation_notes}
+          <EvalNotes notes={turn.evaluation_notes} />
         </div>
       )}
     </div>
@@ -269,8 +333,8 @@ function TurnCell({ run, turn }) {
 function RunInspector({ selectedRunId, selectedRunData, runningId, logs, logsEndRef, handleDeleteRun, getActivePipelineStep }) {
   return (
     <div className="card">
-      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <button
             className="btn-icon"
             onClick={() => { window.location.hash = '#/runs'; }}
@@ -283,6 +347,18 @@ function RunInspector({ selectedRunId, selectedRunData, runningId, logs, logsEnd
             <ClipboardCheck size={16} style={{ color: 'var(--color-primary)' }} />
             INSPECT: {selectedRunId.slice(0, 12)}...
           </span>
+          {selectedRunData && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 12, color: 'var(--muted)', borderLeft: '1px solid var(--border)', paddingLeft: 14 }}>
+              <span>
+                <strong style={{ color: 'var(--fg)' }}>{selectedRunData.provider.toUpperCase()}</strong>
+                <span style={{ marginLeft: 6, fontFamily: 'var(--font-mono)' }}>{selectedRunData.model}</span>
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)' }}>
+                {new Date(selectedRunData.created_at * 1000).toLocaleString()}
+              </span>
+              <span className={`status-badge ${selectedRunData.status}`}>{selectedRunData.status}</span>
+            </div>
+          )}
         </div>
         <button
           className="btn-icon"
@@ -328,40 +404,35 @@ function RunInspector({ selectedRunId, selectedRunData, runningId, logs, logsEnd
               </div>
             )}
 
-            <div className="grid-3" style={{ marginBottom: 24 }}>
-              <div>
-                <div className="form-label">Provider / Model</div>
-                <div style={{ fontWeight: 600 }}>{selectedRunData.provider.toUpperCase()} ({selectedRunData.model})</div>
-              </div>
-              <div>
-                <div className="form-label">Run Created At</div>
-                <div>{new Date(selectedRunData.created_at * 1000).toLocaleString()}</div>
-              </div>
-              <div>
-                <div className="form-label">Overall Status</div>
-                <span className={`status-badge ${selectedRunData.status}`}>{selectedRunData.status}</span>
-              </div>
-            </div>
-
-            <div className="grid-3" style={{ marginBottom: 24 }}>
-              <div>
-                <div className="form-label">Avg TTFA</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 600 }}>
-                  {selectedRunData.metrics?.average_ttfa_ms ? `${selectedRunData.metrics.average_ttfa_ms.toFixed(0)} ms` : '--'}
-                </div>
-              </div>
-              <div>
-                <div className="form-label">Tool Call Accuracy</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 600 }}>
-                  {selectedRunData.metrics?.tool_call_accuracy_rate != null ? `${(selectedRunData.metrics.tool_call_accuracy_rate * 100).toFixed(0)}%` : '--'}
-                </div>
-              </div>
-              <div>
-                <div className="form-label">Hallucinations</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 600, color: selectedRunData.metrics?.hallucination_count > 0 ? 'var(--error)' : 'inherit' }}>
-                  {selectedRunData.metrics?.hallucination_count ?? 0}
-                </div>
-              </div>
+            <div className="metric-tile-grid" style={{ marginBottom: 24 }}>
+              <MetricTile
+                label="Avg TTFA"
+                value={selectedRunData.metrics?.average_ttfa_ms ? `${selectedRunData.metrics.average_ttfa_ms.toFixed(0)} ms` : '—'}
+              />
+              <MetricTile
+                label="Tool Call Accuracy"
+                value={selectedRunData.metrics?.tool_call_accuracy_rate != null ? `${(selectedRunData.metrics.tool_call_accuracy_rate * 100).toFixed(0)}%` : '—'}
+              />
+              <MetricTile
+                label="Response Score"
+                value={(() => {
+                  const rs = selectedRunData.metrics?.response_match_rate ?? responseScore(selectedRunData.turns);
+                  return rs != null ? `${(rs * 100).toFixed(0)}%` : '—';
+                })()}
+              />
+              <MetricTile
+                label="Faithfulness"
+                value={selectedRunData.metrics?.faithfulness_rate != null ? `${(selectedRunData.metrics.faithfulness_rate * 100).toFixed(0)}%` : '—'}
+              />
+              <MetricTile
+                label="Conciseness"
+                value={selectedRunData.metrics?.conciseness_rate != null ? `${(selectedRunData.metrics.conciseness_rate * 100).toFixed(0)}%` : '—'}
+              />
+              <MetricTile
+                label="Hallucinations"
+                value={selectedRunData.metrics?.hallucination_count ?? 0}
+                tone={selectedRunData.metrics?.hallucination_count > 0 ? 'error' : null}
+              />
             </div>
 
             {selectedRunData.stitched_audio_path && (
@@ -399,12 +470,10 @@ function RunInspector({ selectedRunId, selectedRunData, runningId, logs, logsEnd
                     <th>User (Input)</th>
                     <th>Agent (Transcript)</th>
                     <th>TTFA</th>
-                    <th>Int Stop</th>
-                    <th>Tool Called</th>
-                    <th>Tool Eval</th>
+                    <th>Tool</th>
+                    <th>Checks</th>
                     <th>Audio</th>
                     <th>Notes</th>
-                    <th>Result</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -423,18 +492,26 @@ function RunInspector({ selectedRunId, selectedRunData, runningId, logs, logsEnd
                         <td style={{ fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
                           {turn.time_to_first_audio_ms != null ? `${turn.time_to_first_audio_ms.toFixed(0)}ms` : '—'}
                         </td>
-                        <td style={{ fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
-                          {turn.interruption_stop_latency_ms != null ? `${turn.interruption_stop_latency_ms.toFixed(0)}ms` : '—'}
-                        </td>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           {turn.tool_call_details ? <code>{turn.tool_call_details.name}</code> : '—'}
                         </td>
                         <td>
-                          {turn.tool_call_correct !== null && turn.tool_call_correct !== undefined ? (
-                            <span className={`status-badge ${turn.tool_call_correct ? 'completed' : 'failed'}`}>
-                              {turn.tool_call_correct ? 'CORRECT' : 'INCORRECT'}
-                            </span>
-                          ) : '—'}
+                          {turnPending ? (
+                            <span className="status-badge running">RUNNING</span>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <CheckPill name="TOOL" fullName="Tool call" passed={turn.tool_call_correct} />
+                              <CheckPill name="RESP" fullName="Response match" passed={turn.response_match} />
+                              <CheckPill name="FAITH" fullName="Faithfulness" passed={turn.faithfulness_passed} />
+                              <CheckPill name="CNC" fullName="Conciseness" passed={turn.conciseness_passed} />
+                              {turn.hallucination_count != null && (
+                                <span title={`Hallucinations: ${turn.hallucination_count}`}
+                                  style={{ fontSize: 9, padding: '2px 5px', borderRadius: 3, background: turn.hallucination_count > 0 ? 'var(--error)' : 'var(--success, #16a34a)', color: '#fff', fontWeight: 700, letterSpacing: 0.3 }}>
+                                  HALL {turn.hallucination_count}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td style={{ minWidth: 160 }}>
                           {turn.audio_output_path ? (
@@ -444,17 +521,8 @@ function RunInspector({ selectedRunId, selectedRunData, runningId, logs, logsEnd
                             />
                           ) : '—'}
                         </td>
-                        <td style={{ maxWidth: 240, fontSize: 12, color: 'var(--muted)' }}>
-                          {turn.evaluation_notes || '—'}
-                        </td>
-                        <td>
-                          {turnPending ? (
-                            <span className="status-badge running">RUNNING</span>
-                          ) : (
-                            <span className={`status-badge ${passed ? 'completed' : 'failed'}`}>
-                              {passed ? 'PASS' : 'FAIL'}
-                            </span>
-                          )}
+                        <td style={{ maxWidth: 280, fontSize: 12, color: 'var(--muted)' }}>
+                          <EvalNotes notes={turn.evaluation_notes} />
                         </td>
                       </tr>
                     );

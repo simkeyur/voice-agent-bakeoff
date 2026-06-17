@@ -34,6 +34,8 @@ class TurnMetric(BaseModel):
     hallucination_count: Optional[int] = None
     evaluation_notes: Optional[str] = None
     response_match: Optional[bool] = None
+    faithfulness_passed: Optional[bool] = None
+    conciseness_passed: Optional[bool] = None
     evaluation_passed: Optional[bool] = None
 
 class AggregateMetrics(BaseModel):
@@ -41,6 +43,9 @@ class AggregateMetrics(BaseModel):
     average_ttfa_ms: Optional[float] = None
     average_interruption_stop_latency_ms: Optional[float] = None
     tool_call_accuracy_rate: Optional[float] = None
+    response_match_rate: Optional[float] = None
+    faithfulness_rate: Optional[float] = None
+    conciseness_rate: Optional[float] = None
     hallucination_count: int = 0
     total_cost_usd: float = 0.0
     transcript_fidelity_score: Optional[float] = None  # 0 to 1 score from evaluator

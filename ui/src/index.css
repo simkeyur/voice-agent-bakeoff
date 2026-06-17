@@ -410,6 +410,12 @@ a {
   margin-top: 4px;
 }
 
+.metric-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
 /* Logs / Terminal style */
 .terminal {
   background-color: var(--muted-light);

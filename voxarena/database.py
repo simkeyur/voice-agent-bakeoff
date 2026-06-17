@@ -114,6 +114,10 @@ def init_db():
             conn.execute("ALTER TABLE turns ADD COLUMN completion_tokens INTEGER;")
         if "cost_usd" not in existing_cols:
             conn.execute("ALTER TABLE turns ADD COLUMN cost_usd REAL;")
+        if "faithfulness_passed" not in existing_cols:
+            conn.execute("ALTER TABLE turns ADD COLUMN faithfulness_passed INTEGER;")
+        if "conciseness_passed" not in existing_cols:
+            conn.execute("ALTER TABLE turns ADD COLUMN conciseness_passed INTEGER;")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS settings (
@@ -191,8 +195,9 @@ _TURN_UPSERT_SQL = """
         audio_completed_received_at, interruption_sent_at, interruption_stopped_at,
         time_to_first_audio_ms, interruption_stop_latency_ms, tool_call_correct,
         tool_call_details, hallucination_count, evaluation_notes,
-        response_match, evaluation_passed, prompt_tokens, completion_tokens, cost_usd
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        response_match, evaluation_passed, prompt_tokens, completion_tokens, cost_usd,
+        faithfulness_passed, conciseness_passed
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id, utterance_id) DO UPDATE SET
         text_input = excluded.text_input,
         audio_input_path = excluded.audio_input_path,
@@ -213,7 +218,9 @@ _TURN_UPSERT_SQL = """
         evaluation_passed = excluded.evaluation_passed,
         prompt_tokens = excluded.prompt_tokens,
         completion_tokens = excluded.completion_tokens,
-        cost_usd = excluded.cost_usd;
+        cost_usd = excluded.cost_usd,
+        faithfulness_passed = excluded.faithfulness_passed,
+        conciseness_passed = excluded.conciseness_passed;
 """
 
 
@@ -240,6 +247,7 @@ def _turn_row(run_id: str, turn: TurnMetric) -> tuple:
         turn.hallucination_count, turn.evaluation_notes,
         _bool_or_none(turn.response_match), _bool_or_none(turn.evaluation_passed),
         turn.prompt_tokens, turn.completion_tokens, turn.cost_usd,
+        _bool_or_none(turn.faithfulness_passed), _bool_or_none(turn.conciseness_passed),
     )
 
 
@@ -307,6 +315,14 @@ def load_run_manifest(run_id: str) -> Optional[RunManifest]:
             if row["evaluation_passed"] is not None:
                 evaluation_passed = bool(row["evaluation_passed"])
 
+            faithfulness_passed = None
+            if "faithfulness_passed" in row.keys() and row["faithfulness_passed"] is not None:
+                faithfulness_passed = bool(row["faithfulness_passed"])
+
+            conciseness_passed = None
+            if "conciseness_passed" in row.keys() and row["conciseness_passed"] is not None:
+                conciseness_passed = bool(row["conciseness_passed"])
+
             turns.append(TurnMetric(
                 utterance_id=row["utterance_id"],
                 text_input=row["text_input"],
@@ -326,6 +342,8 @@ def load_run_manifest(run_id: str) -> Optional[RunManifest]:
                 evaluation_notes=row["evaluation_notes"],
                 response_match=response_match,
                 evaluation_passed=evaluation_passed,
+                faithfulness_passed=faithfulness_passed,
+                conciseness_passed=conciseness_passed,
                 prompt_tokens=row["prompt_tokens"] if "prompt_tokens" in row.keys() else None,
                 completion_tokens=row["completion_tokens"] if "completion_tokens" in row.keys() else None,
                 cost_usd=row["cost_usd"] if "cost_usd" in row.keys() else None,

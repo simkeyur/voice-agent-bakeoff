@@ -102,7 +102,25 @@ async def run_evaluation(
         ACTIVE_HARNESSES[run_id] = harness
 
         await harness.run_session(utterances=utterances, num_turns=num_turns)
-        return RunManifest.load(harness.manifest.manifest_path)
+        manifest = RunManifest.load(harness.manifest.manifest_path)
+
+        # Post-run LLM semantic evaluation (only when a model is configured).
+        eval_model = get_setting("EVALUATION_MODEL")
+        if eval_model:
+            try:
+                from voxarena.evaluator import LLMEvaluator
+                from voxarena.database import load_utterances_from_db, save_run_manifest
+
+                eval_utterances = utterances or load_utterances_from_db()
+                scored = await asyncio.to_thread(
+                    LLMEvaluator().run_post_evaluation, manifest, eval_utterances
+                )
+                if scored:
+                    await asyncio.to_thread(save_run_manifest, manifest)
+            except Exception as e:
+                logger.warning(f"LLM post-evaluation failed (run still recorded): {e}")
+
+        return manifest
     except Exception as e:
         logger.error(f"Run {run_id} failed: {e}")
         _mark_manifest_failed(provider, run_id, str(e))

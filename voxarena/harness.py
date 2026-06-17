@@ -561,6 +561,11 @@ class EvaluationHarness:
             sum(1 for t in evaluated if t.tool_call_correct) / len(evaluated)
             if evaluated else None
         )
+        response_match_scored = [t for t in turns if t.response_match is not None]
+        response_match_rate = (
+            sum(1 for t in response_match_scored if t.response_match) / len(response_match_scored)
+            if response_match_scored else None
+        )
         hallucination_count = sum(t.hallucination_count or 0 for t in turns)
         total_cost = sum(t.cost_usd for t in turns if t.cost_usd is not None)
 
@@ -569,6 +574,7 @@ class EvaluationHarness:
             average_ttfa_ms=avg_ttfa,
             average_interruption_stop_latency_ms=avg_interruption,
             tool_call_accuracy_rate=tool_accuracy,
+            response_match_rate=response_match_rate,
             hallucination_count=hallucination_count,
             total_cost_usd=total_cost,
         )

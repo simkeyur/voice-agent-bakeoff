@@ -163,12 +163,23 @@ async def handle_barge_in(
 
     if interrupted_turn and interrupted_turn.interruption_sent_at and interrupted_turn.interruption_stopped_at is None:
         stopped_ms = collector.last_bot_output_at or (time.time() * 1000.0)
-        interrupted_turn.interruption_stopped_at = stopped_ms
-        interrupted_turn.interruption_stop_latency_ms = stopped_ms - interrupted_turn.interruption_sent_at
-        logger.info(
-            f"[Harness] Barge-in: interruption_stop_latency_ms="
-            f"{interrupted_turn.interruption_stop_latency_ms:.0f}ms for {ctx.utt_id}."
-        )
+        delta = stopped_ms - interrupted_turn.interruption_sent_at
+        if delta < 0:
+            # Bot already finished streaming audio before we sent the interruption
+            # — nothing to actually interrupt. Latency isn't meaningful here.
+            logger.info(
+                f"[Harness] Barge-in: bot already stopped {-delta:.0f}ms before "
+                f"interruption for {ctx.utt_id}; recording no stop latency."
+            )
+            interrupted_turn.interruption_stopped_at = None
+            interrupted_turn.interruption_stop_latency_ms = None
+        else:
+            interrupted_turn.interruption_stopped_at = stopped_ms
+            interrupted_turn.interruption_stop_latency_ms = delta
+            logger.info(
+                f"[Harness] Barge-in: interruption_stop_latency_ms="
+                f"{delta:.0f}ms for {ctx.utt_id}."
+            )
 
     return False, pending_injection_task
 
