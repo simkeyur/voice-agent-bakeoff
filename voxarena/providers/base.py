@@ -61,6 +61,12 @@ class RunMetricsCollector(FrameProcessor):
         # audio (Gemini Live doesn't send LLMFullResponseEndFrame after an
         # InterruptionFrame, so this is the only reliable stop signal).
         self.last_bot_output_at: Optional[float] = None
+        # Buffer for tool result strings produced by the registered callback.
+        # The callback can fire inside the LLM service before our
+        # FunctionCallInProgressFrame handler runs (so tool_call_details may
+        # still be None when the callback writes). The frame handlers merge
+        # this buffer into tool_call_details once it exists.
+        self.pending_tool_result: Optional[str] = None
 
     def on_input_injected(self, utterance_id: str, text: str, expect: Optional[Dict[str, Any]] = None):
         """Programmatically register a turn start from the harness."""
@@ -68,6 +74,7 @@ class RunMetricsCollector(FrameProcessor):
         self.turn_completed_event.clear()
         self.bot_started_speaking_event.clear()
         self.tool_call_completed_event.clear()
+        self.pending_tool_result = None
         self.current_expect = expect or {}
 
         self.current_turn = TurnMetric(
@@ -119,12 +126,21 @@ class RunMetricsCollector(FrameProcessor):
                         "args": frame.arguments or {},
                         "called_at": now_ms
                     }
+                # Merge any pending result the callback wrote before this frame arrived.
+                if self.pending_tool_result is not None:
+                    self.current_turn.tool_call_details["result"] = self.pending_tool_result
+                    self.pending_tool_result = None
 
         elif isinstance(frame, FunctionCallResultFrame):
             if self.current_turn and self.current_turn.tool_call_details:
                 call_at = self.current_turn.tool_call_details.get("called_at", now_ms)
                 self.current_turn.tool_call_details["result_received_at"] = now_ms
                 self.current_turn.tool_call_details["latency_ms"] = now_ms - call_at
+                # Also merge here in case the callback fired between
+                # FunctionCallInProgressFrame and FunctionCallResultFrame.
+                if self.pending_tool_result is not None:
+                    self.current_turn.tool_call_details["result"] = self.pending_tool_result
+                    self.pending_tool_result = None
                 logger.debug(f"[MetricsCollector] Tool call resolved in {now_ms - call_at:.2f} ms")
             # Wake the harness even when current_turn is None — but the harness
             # also reads current_turn before deciding what to do.
@@ -223,10 +239,15 @@ class BaseProviderAdapter:
             logger.info(f"[Tool] {name}({args}) using template {self.agent.template_id}")
             try:
                 result_str = execute_tool(name, args, template_id=self.agent.template_id)
-                # Record the tool's result on the turn so the post-run LLM
-                # evaluator can check faithfulness/hallucinations against ground truth.
-                if collector.current_turn and collector.current_turn.tool_call_details:
-                    collector.current_turn.tool_call_details["result"] = result_str
+                # Buffer the result; the frame handlers (FunctionCallInProgressFrame
+                # / FunctionCallResultFrame) merge it into tool_call_details once
+                # that dict exists. The callback may fire BEFORE those frames
+                # are processed by us, so we can't write directly.
+                if collector.current_turn:
+                    if collector.current_turn.tool_call_details:
+                        collector.current_turn.tool_call_details["result"] = result_str
+                    else:
+                        collector.pending_tool_result = result_str
                 await params.result_callback({"result": result_str})
             except Exception as e:
                 logger.error(f"[Tool] Error in {name}: {e}")
